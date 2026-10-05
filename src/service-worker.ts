@@ -94,8 +94,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'BreakLoop';
   const options: NotificationOptions = {
     body: data.body || 'Time for a break!',
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     tag: 'breakloop-notification',
     requireInteraction: false,
   };

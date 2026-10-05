@@ -1,6 +1,7 @@
 import { BreakRule, BreakRuleKind, BreakSchedule } from '../state/types';
 import { describeRule, RULE_COLORS } from '../utils/schedule-engine';
 import {
+  formatTimeOfDay,
   isValidTimeString,
   minutesToTimeString,
   timeStringToMinutes,
@@ -61,11 +62,7 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-function formatClock(time: string): string {
-  const m = timeStringToMinutes(time);
-  const h = Math.floor(m / 60);
-  return `${h % 12 === 0 ? 12 : h % 12}:${pad(m % 60)} ${h < 12 ? 'AM' : 'PM'}`;
-}
+const formatClock = formatTimeOfDay;
 
 /**
  * Editor for the per-day schedule: workday toggle, hours and break rules, plus

@@ -2,7 +2,12 @@ import { Dashboard } from './components/dashboard';
 import { TaskManager } from './components/task-manager';
 import { FocusTimer } from './components/focus-timer';
 import { WeeklySchedule } from './components/weekly-schedule';
-import { renderSettingsFields, readSettingsFields, showFormError } from './components/settings-form';
+import {
+  previewTime,
+  renderSettingsSections,
+  readSettingsFields,
+  showFormError,
+} from './components/settings-form';
 import {
   initializeStorage,
   getSettings,
@@ -13,14 +18,14 @@ import {
   saveBreakLogEntry,
   deleteBreakLogEntry,
   DEFAULT_SETTINGS,
+  exportAllData,
+  resetAllData,
 } from './utils/storage';
 import { generateBreaksForDay, legacyRules } from './utils/schedule-engine';
-import { getCurrentDayOfWeek, getLocalDateKey } from './utils/time-calculations';
+import { getCurrentDayOfWeek, getLocalDateKey, setTimeConfig } from './utils/time-calculations';
 import { NotificationManager } from './utils/notification-manager';
 import { playNotificationSound, sendNotification } from './utils/service-worker';
 import { AppState, BreakLogEntry, BreakSchedule, BreakStatus, Settings } from './state/types';
-
-const SNOOZE_MINUTES = 5;
 
 type ModalView = 'tasks' | 'focus' | 'schedule' | 'settings' | 'help';
 
@@ -61,6 +66,7 @@ export class App {
     }
 
     this.applyTheme();
+    this.applyTimeConfig();
 
     this.notifications = new NotificationManager(this.state.settings);
     this.focusTimer.setOnComplete(() => this.handleFocusComplete());
@@ -173,6 +179,10 @@ export class App {
       }
     });
 
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (this.state.settings.theme === 'system') this.applyTheme();
+    });
+
     // Re-sync when the tab becomes visible again (timers are throttled in background)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -200,6 +210,7 @@ export class App {
 
   /** Persist settings, rewrite all day schedules to match, and refresh the UI. */
   private async saveSettings(values: Partial<Settings>) {
+    const previousZone = this.state.settings.timeZone;
     this.state.settings = { ...this.state.settings, ...values };
 
     try {
@@ -219,8 +230,11 @@ export class App {
       console.error('Failed to save settings:', error);
     }
 
+    const zoneChanged = previousZone !== this.state.settings.timeZone;
     this.notifications?.updateSettings(this.state.settings);
+    if (zoneChanged) this.notifications?.reset();
     this.applyTheme();
+    this.applyTimeConfig();
     await this.loadToday();
     this.render();
   }
@@ -234,7 +248,7 @@ export class App {
     } else {
       const entry: BreakLogEntry = { id, date: this.state.today, breakId, status };
       if (status === 'snoozed') {
-        entry.snoozedUntil = Date.now() + SNOOZE_MINUTES * 60 * 1000;
+        entry.snoozedUntil = Date.now() + this.state.settings.snoozeMinutes * 60 * 1000;
       }
       log[breakId] = entry;
     }
@@ -276,6 +290,25 @@ export class App {
       if (target === modal || target.closest('[data-modal-close]')) {
         this.closeModal();
       }
+    });
+
+    modal.addEventListener('click', (e) => {
+      const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+      if (action === 'export-data') void this.exportData();
+      if (action === 'reset-data') void this.resetData();
+    });
+
+    // Live "current time" preview under the time zone picker
+    modal.addEventListener('change', (e) => {
+      const form = (e.target as HTMLElement).closest<HTMLFormElement>('#settings-form');
+      const preview = form?.querySelector('#time-zone-preview');
+      if (!form || !preview) return;
+      const zone = form.querySelector<HTMLSelectElement>('#time-zone')?.value ?? 'auto';
+      const format =
+        form.querySelector<HTMLInputElement>('input[name="time-format"]:checked')?.value === '12h'
+          ? '12h'
+          : '24h';
+      preview.textContent = previewTime(zone, format);
     });
 
     modal.addEventListener('submit', (e) => {
@@ -330,7 +363,7 @@ export class App {
         title.textContent = 'Settings';
         body.innerHTML = `
           <form id="settings-form" class="settings-form" novalidate>
-            ${renderSettingsFields(this.state.settings, true)}
+            ${renderSettingsSections(this.state.settings)}
             <button type="submit" class="btn btn-primary btn-large">Save</button>
           </form>
         `;
@@ -343,7 +376,7 @@ export class App {
             Coloured arcs are your breaks, numbered in order. The red hand is the current time.</p>
             <p><strong>Breaks</strong> are scheduled every N minutes from the start of your day.
             You'll get a reminder one minute before each break. Mark breaks as complete, skip them,
-            or snooze a break for ${SNOOZE_MINUTES} minutes.</p>
+            or snooze a break for ${this.state.settings.snoozeMinutes} minutes.</p>
             <p><strong>Schedule</strong> lets you set hours, workdays and breaks per day: at an exact time,
             a number of evenly spaced breaks, or a break that repeats. Copy a day to others in one step.</p>
             <p><strong>Focus sessions</strong> keep running when you close the panel; the button on the
@@ -423,9 +456,8 @@ export class App {
       : Promise.resolve(false);
 
     await this.saveSettings(result.values);
-    await permission;
-
     this.closeModal();
+    await permission;
   }
 
   private handleFocusComplete() {
@@ -435,7 +467,7 @@ export class App {
     if (this.state.settings.notificationsEnabled) {
       void sendNotification('Focus session complete', {
         body: 'Nice work! Time to take a break.',
-        icon: '/icon.svg',
+        icon: '/icon-192.png',
         tag: 'focus-complete',
       });
     }
@@ -444,11 +476,45 @@ export class App {
   // ---- Theme & update loop ----
 
   private applyTheme() {
-    const dark = this.state.settings.darkMode;
+    const { theme, accent } = this.state.settings;
+    const dark =
+      theme === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark';
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.accent = accent;
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute('content', dark ? '#070908' : '#ffffff');
+  }
+
+  private applyTimeConfig() {
+    setTimeConfig(this.state.settings.timeZone, this.state.settings.timeFormat);
+  }
+
+  private async exportData() {
+    try {
+      const data = await exportAllData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `breakloop-${this.state.today}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export data:', error);
+    }
+  }
+
+  private async resetData() {
+    if (!window.confirm('Delete all schedules, tasks, history and settings? This cannot be undone.')) {
+      return;
+    }
+    try {
+      await resetAllData();
+    } catch (error) {
+      console.error('Failed to reset data:', error);
+    }
+    window.location.reload();
   }
 
   private async tick() {

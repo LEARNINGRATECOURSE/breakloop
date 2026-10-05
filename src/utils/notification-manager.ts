@@ -1,12 +1,11 @@
 import { Break, BreakLogEntry, Settings } from '../state/types';
-import { minutesToTimestamp, timeStringToMinutes } from './time-calculations';
+import { formatTimeOfDay, minutesToTimestamp, timeStringToMinutes } from './time-calculations';
 import {
   playNotificationSound,
   requestNotificationPermission,
   sendNotification,
 } from './service-worker';
 
-const LEAD_TIME_MS = 60 * 1000; // notify 1 minute before a break
 const GRACE_MS = 5 * 60 * 1000; // don't fire stale reminders (e.g. after the laptop wakes)
 
 /**
@@ -45,7 +44,8 @@ export class NotificationManager {
         dueAt = entry.snoozedUntil;
         key = `${today}|${breakItem.id}|${entry.snoozedUntil}`;
       } else {
-        dueAt = minutesToTimestamp(timeStringToMinutes(breakItem.startTime)) - LEAD_TIME_MS;
+        dueAt = minutesToTimestamp(timeStringToMinutes(breakItem.startTime)) -
+          this.settings.reminderLeadMinutes * 60 * 1000;
         key = `${today}|${breakItem.id}|0`;
       }
 
@@ -69,12 +69,12 @@ export class NotificationManager {
 
     const body = snoozed
       ? `Snooze is over — time for your ${breakItem.duration} minute break.`
-      : `${breakItem.duration} minute break at ${breakItem.startTime}`;
+      : `${breakItem.duration} minute break at ${formatTimeOfDay(breakItem.startTime)}`;
 
     void sendNotification(snoozed ? 'Break time!' : `Time for ${breakItem.name.toLowerCase()} soon!`, {
       body,
-      icon: '/icon.svg',
-      badge: '/icon.svg',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
       tag: `break-${breakItem.id}`,
       requireInteraction: true,
     });

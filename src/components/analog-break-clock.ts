@@ -2,6 +2,8 @@ import { Break, BreakLogEntry } from '../state/types';
 import {
   timeStringToMinutes,
   minutesToTimeString,
+  formatTimeOfDay,
+  formatHourLabel,
   getSecondsSinceMidnight,
   angleTo,
 } from '../utils/time-calculations';
@@ -79,10 +81,10 @@ export class AnalogBreakClock {
   }
 
   private describe(): string {
-    const start = minutesToTimeString(this.startMinutes);
-    const end = minutesToTimeString(this.endMinutes);
-    const now = minutesToTimeString(Math.floor(getSecondsSinceMidnight() / 60));
-    const times = this.breaks.map((b) => b.startTime).join(', ');
+    const start = formatTimeOfDay(minutesToTimeString(this.startMinutes));
+    const end = formatTimeOfDay(minutesToTimeString(this.endMinutes));
+    const now = formatTimeOfDay(minutesToTimeString(Math.floor(getSecondsSinceMidnight() / 60)));
+    const times = this.breaks.map((b) => formatTimeOfDay(b.startTime)).join(', ');
     return (
       `Break schedule clock for working hours ${start} to ${end}. Current time ${now}. ` +
       (this.breaks.length
@@ -150,8 +152,8 @@ export class AnalogBreakClock {
       text.setAttribute('font-size', '12');
       text.setAttribute('font-weight', '500');
       text.textContent = isStart && minutes % 60 !== 0
-        ? minutesToTimeString(minutes)
-        : String(Math.floor(minutes / 60) % 24);
+        ? formatTimeOfDay(minutesToTimeString(minutes))
+        : formatHourLabel(Math.floor(minutes / 60));
       this.svg.appendChild(text);
     }
   }

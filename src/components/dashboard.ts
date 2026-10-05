@@ -7,6 +7,7 @@ import {
   minutesToTimestamp,
   minutesToTimeString,
   formatDuration,
+  formatTimeOfDay,
 } from '../utils/time-calculations';
 
 export interface DashboardData {
@@ -78,7 +79,7 @@ export class Dashboard {
     if (hours) {
       hours.textContent = !data.isWorkday
         ? 'Day off'
-        : `${data.workStart} – ${data.workEnd} · ${formatDuration(
+        : `${formatTimeOfDay(data.workStart)} – ${formatTimeOfDay(data.workEnd)} · ${formatDuration(
         netWorkMinutes(data.workStart, data.workEnd, data.breaks)
       )} of work time`;
     }
@@ -105,6 +106,7 @@ export class Dashboard {
     this.container.innerHTML = `
       <div class="dashboard">
         <header class="app-header">
+          <img class="app-logo" src="/logo.png" alt="" width="64" height="36">
           <h1>BreakLoop</h1>
           <p class="subtitle">Work smarter, rest better</p>
         </header>
@@ -173,10 +175,10 @@ export class Dashboard {
         ? `resumes in ${formatCountdown(entry!.snoozedUntil! - now)}`
         : `ends in ${formatCountdown(endOf(current) - now)}`;
       bodyHtml = `
-        <p class="break-type">Break ${breaks.indexOf(current) + 1} • ${current.startTime} • ${current.duration}m</p>
+        <p class="break-type">Break ${breaks.indexOf(current) + 1} • ${formatTimeOfDay(current.startTime)} • ${current.duration}m</p>
         <div class="break-card-actions">
           <button class="btn btn-primary btn-small" data-action="complete-break" data-break-id="${current.id}">Complete</button>
-          <button class="btn btn-secondary btn-small" data-action="snooze-break" data-break-id="${current.id}">Snooze 5m</button>
+          <button class="btn btn-secondary btn-small" data-action="snooze-break" data-break-id="${current.id}">Snooze ${this.data.settings.snoozeMinutes}m</button>
           <button class="btn btn-secondary btn-small" data-action="skip-break" data-break-id="${current.id}">Skip</button>
         </div>
       `;
@@ -184,7 +186,7 @@ export class Dashboard {
       titleText = 'Next Break';
       countdownText = `in ${formatCountdown(startOf(next) - now)}`;
       bodyHtml = `
-        <p class="break-type">Break ${breaks.indexOf(next) + 1} at ${next.startTime} • ${next.duration}m</p>
+        <p class="break-type">Break ${breaks.indexOf(next) + 1} at ${formatTimeOfDay(next.startTime)} • ${next.duration}m</p>
         <div class="break-card-actions">
           <button class="btn btn-secondary btn-small" data-action="skip-break" data-break-id="${next.id}">Skip</button>
         </div>
@@ -244,7 +246,7 @@ export class Dashboard {
           <li class="break-item ${stateClass}">
             <span class="break-number" style="background-color: ${b.color}">${i + 1}</span>
             <span class="break-info">
-              <strong>${b.startTime} – ${minutesToTimeString(start + b.duration)}</strong>
+              <strong>${formatTimeOfDay(b.startTime)} – ${formatTimeOfDay(minutesToTimeString(start + b.duration))}</strong>
               ${b.name} • ${b.duration}m${statusLabel ? ` <span class="break-status">${statusLabel}</span>` : ''}
             </span>
             ${actions}
@@ -265,6 +267,7 @@ export class Dashboard {
     this.container.innerHTML = `
       <div class="onboarding">
         <header class="onboarding-header">
+          <img class="app-logo" src="/logo.png" alt="" width="96" height="54">
           <h1>Welcome to BreakLoop</h1>
           <p>Let's set up your workday</p>
         </header>

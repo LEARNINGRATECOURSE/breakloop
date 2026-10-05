@@ -60,6 +60,9 @@ export interface Task {
   createdAt: number; // timestamp
 }
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type AccentColor = 'red' | 'orange' | 'green' | 'teal' | 'blue' | 'purple';
+
 export interface Settings {
   workingHoursStart: string; // "HH:mm"
   workingHoursEnd: string; // "HH:mm"
@@ -67,7 +70,12 @@ export interface Settings {
   breakDurationMinutes: number;
   notificationsEnabled: boolean;
   soundEnabled: boolean;
-  darkMode: boolean;
+  theme: ThemeMode;
+  accent: AccentColor;
+  timeFormat: '12h' | '24h';
+  timeZone: string; // 'auto' (device) or an IANA name like "Europe/Paris"
+  reminderLeadMinutes: number; // notify this long before a break (0 = at start)
+  snoozeMinutes: number;
   onboarded: boolean;
 }
 

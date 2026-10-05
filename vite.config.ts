@@ -13,12 +13,9 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait-primary',
         icons: [
-          {
-            src: '/icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any',
-          },
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       strategies: 'injectManifest',
@@ -27,7 +24,7 @@ export default defineConfig({
       // Registered manually in src/utils/service-worker.ts (production only)
       injectRegister: false,
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
         rollupFormat: 'iife',
       },
     }),

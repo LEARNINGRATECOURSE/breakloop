@@ -42,12 +42,21 @@ export interface Settings {
   onboarded: boolean;
 }
 
+export type BreakStatus = 'completed' | 'skipped' | 'snoozed';
+
+export interface BreakLogEntry {
+  id: string; // `${date}|${breakId}`
+  date: string; // "YYYY-MM-DD" (local)
+  breakId: string;
+  status: BreakStatus;
+  snoozedUntil?: number; // timestamp, when status is 'snoozed'
+}
+
 export interface AppState {
   settings: Settings;
   schedules: BreakSchedule[];
   tasks: Task[];
   todayBreaks: Break[];
-  nextBreak: Break | null;
-  currentTime: number; // timestamp
-  isWorkingHours: boolean;
+  breakLog: Record<string, BreakLogEntry>; // keyed by breakId, today only
+  today: string; // "YYYY-MM-DD" (local)
 }

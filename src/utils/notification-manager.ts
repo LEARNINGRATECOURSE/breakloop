@@ -1,9 +1,23 @@
-import { Break, Settings } from '../state/types';
-import { playNotificationSound } from './service-worker';
+import { Break, BreakLogEntry, Settings } from '../state/types';
+import { minutesToTimestamp, timeStringToMinutes } from './time-calculations';
+import {
+  playNotificationSound,
+  requestNotificationPermission,
+  sendNotification,
+} from './service-worker';
 
+const LEAD_TIME_MS = 60 * 1000; // notify 1 minute before a break
+const GRACE_MS = 5 * 60 * 1000; // don't fire stale reminders (e.g. after the laptop wakes)
+
+/**
+ * Fires break reminders. Instead of long setTimeouts (which drift, get throttled
+ * in background tabs and break across sleep), `check()` is called from the app's
+ * one-second tick and fires any reminder whose time has arrived.
+ */
 export class NotificationManager {
   private settings: Settings;
-  private scheduledNotifications: Map<string, number> = new Map();
+  // Keys of reminders already fired, e.g. "2026-10-05|break-10:50|0"
+  private fired: Set<string> = new Set();
 
   constructor(settings: Settings) {
     this.settings = settings;
@@ -13,82 +27,64 @@ export class NotificationManager {
     this.settings = settings;
   }
 
-  public scheduleBreakNotification(breakItem: Break) {
-    if (!this.settings.notificationsEnabled) {
-      return;
-    }
+  public check(
+    breaks: Break[],
+    log: Record<string, BreakLogEntry>,
+    today: string,
+    now: number = Date.now()
+  ) {
+    for (const breakItem of breaks) {
+      const entry = log[breakItem.id];
+      if (entry && entry.status !== 'snoozed') {
+        continue; // completed or skipped
+      }
 
-    // Parse break time
-    const [hours, minutes] = breakItem.startTime.split(':').map(Number);
-    const breakTimeMs =
-      (hours * 60 + minutes) * 60 * 1000 - Date.now() % (24 * 60 * 60 * 1000);
+      let dueAt: number;
+      let key: string;
+      if (entry?.status === 'snoozed' && entry.snoozedUntil) {
+        dueAt = entry.snoozedUntil;
+        key = `${today}|${breakItem.id}|${entry.snoozedUntil}`;
+      } else {
+        dueAt = minutesToTimestamp(timeStringToMinutes(breakItem.startTime)) - LEAD_TIME_MS;
+        key = `${today}|${breakItem.id}|0`;
+      }
 
-    if (breakTimeMs > 0) {
-      const timeoutId = window.setTimeout(() => {
-        this.showBreakNotification(breakItem);
-      }, breakTimeMs - 60000); // 1 minute before
-
-      this.scheduledNotifications.set(breakItem.id, timeoutId);
+      if (now >= dueAt && !this.fired.has(key)) {
+        this.fired.add(key);
+        if (now - dueAt <= GRACE_MS) {
+          this.showBreakNotification(breakItem, entry?.status === 'snoozed');
+        }
+      }
     }
   }
 
-  public showBreakNotification(breakItem: Break) {
+  public showBreakNotification(breakItem: Break, snoozed = false) {
     if (!this.settings.notificationsEnabled) {
       return;
     }
 
-    // Play sound
     if (this.settings.soundEnabled) {
       playNotificationSound();
     }
 
-    // Show notification
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const notification = new Notification(`Time for ${breakItem.name}!`, {
-        body: `${breakItem.duration} minute break at ${breakItem.startTime}`,
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        tag: `break-${breakItem.id}`,
-        requireInteraction: true,
-      });
+    const body = snoozed
+      ? `Snooze is over — time for your ${breakItem.duration} minute break.`
+      : `${breakItem.duration} minute break at ${breakItem.startTime}`;
 
-      notification.onclick = () => {
-        window.focus();
-        notification.close();
-      };
-    }
-  }
-
-  public cancelNotification(breakId: string) {
-    const timeoutId = this.scheduledNotifications.get(breakId);
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      this.scheduledNotifications.delete(breakId);
-    }
-  }
-
-  public cancelAll() {
-    this.scheduledNotifications.forEach((timeoutId) => {
-      clearTimeout(timeoutId);
+    void sendNotification(snoozed ? 'Break time!' : `Time for ${breakItem.name.toLowerCase()} soon!`, {
+      body,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      tag: `break-${breakItem.id}`,
+      requireInteraction: true,
     });
-    this.scheduledNotifications.clear();
   }
 
-  public static async requestPermission(): Promise<boolean> {
-    if (!('Notification' in window)) {
-      console.log('Notifications not supported');
-      return false;
-    }
+  public reset() {
+    this.fired.clear();
+  }
 
-    if (Notification.permission === 'granted') {
-      return true;
-    }
-
-    if (Notification.permission !== 'denied') {
-      const permission = await Notification.requestPermission();
-      return permission === 'granted';
-    }
-
-    return false;
+  public static requestPermission(): Promise<boolean> {
+    return requestNotificationPermission();
   }
 }

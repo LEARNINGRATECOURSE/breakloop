@@ -23,10 +23,10 @@ export class TaskManager {
       <div class="task-manager">
         <div class="task-header">
           <h2>Tasks</h2>
-          <button id="add-task-btn" class="btn btn-small" title="Add new task">+</button>
+          <button id="add-task-btn" class="btn btn-primary btn-small" title="Add new task" aria-label="Add new task">+ Add</button>
         </div>
 
-        <form id="task-form" class="task-form" style="display: none;">
+        <form id="task-form" class="task-form" hidden>
           <input type="text" id="task-title" placeholder="Task title" required>
           <textarea id="task-description" placeholder="Description (optional)"></textarea>
 
@@ -62,13 +62,14 @@ export class TaskManager {
 
     return `
       <ul class="task-items">
-        ${this.tasks
+        ${[...this.tasks]
           .sort((a, b) => {
-            // Sort by priority (high > medium > low)
+            // Open tasks first, then by priority (high > medium > low), then newest first
             const priorityOrder = { high: 0, medium: 1, low: 2 };
             return (
-              priorityOrder[a.priority as keyof typeof priorityOrder] -
-              priorityOrder[b.priority as keyof typeof priorityOrder]
+              Number(a.completed) - Number(b.completed) ||
+              priorityOrder[a.priority] - priorityOrder[b.priority] ||
+              b.createdAt - a.createdAt
             );
           })
           .map((task) => this.renderTaskItem(task))
@@ -89,7 +90,7 @@ export class TaskManager {
     return `
       <li class="task-item ${task.completed ? 'completed' : ''}" data-task-id="${task.id}">
         <div class="task-checkbox-wrapper">
-          <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
+          <input type="checkbox" class="task-checkbox" aria-label="Mark complete" ${task.completed ? 'checked' : ''}>
         </div>
 
         <div class="task-content">
@@ -113,58 +114,60 @@ export class TaskManager {
   }
 
   private attachEventListeners() {
-    const addBtn = this.container.getElementById('add-task-btn');
-    const form = this.container.getElementById('task-form');
-    const cancelBtn = this.container.getElementById('cancel-task');
-    const submitBtn = form?.querySelector('button[type="submit"]');
-    const taskList = this.container.getElementById('tasks-list');
+    const addBtn = this.container.querySelector<HTMLButtonElement>('#add-task-btn');
+    const form = this.container.querySelector<HTMLFormElement>('#task-form');
+    const cancelBtn = this.container.querySelector<HTMLButtonElement>('#cancel-task');
+    const taskList = this.container.querySelector<HTMLElement>('#tasks-list');
 
     // Show form
     addBtn?.addEventListener('click', () => {
-      form!.style.display = 'block';
+      if (!form) return;
+      form.hidden = false;
+      form.querySelector<HTMLInputElement>('#task-title')?.focus();
     });
 
     // Cancel form
     cancelBtn?.addEventListener('click', () => {
-      form!.style.display = 'none';
-      (form?.querySelector('input') as HTMLInputElement).value = '';
+      if (!form) return;
+      form.reset();
+      form.hidden = true;
     });
 
     // Submit form
-    form?.addEventListener('submit', (e) => {
+    form?.addEventListener('submit', (e: SubmitEvent) => {
       e.preventDefault();
-      this.handleTaskSubmit(form);
+      void this.handleTaskSubmit(form);
     });
 
     // Task checkboxes and delete buttons
-    taskList?.addEventListener('change', (e) => {
+    taskList?.addEventListener('change', (e: Event) => {
       const target = e.target as HTMLInputElement;
       if (target.classList.contains('task-checkbox')) {
-        const taskId = (target.closest('.task-item') as HTMLElement).dataset.taskId;
+        const taskId = target.closest<HTMLElement>('.task-item')?.dataset.taskId;
         if (taskId) {
-          this.toggleTaskComplete(taskId);
+          void this.toggleTaskComplete(taskId);
         }
       }
     });
 
-    taskList?.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.classList.contains('task-delete-btn')) {
-        const taskId = (target.closest('.task-item') as HTMLElement).dataset.taskId;
+    taskList?.addEventListener('click', (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest<HTMLElement>('.task-delete-btn');
+      if (target) {
+        const taskId = target.closest<HTMLElement>('.task-item')?.dataset.taskId;
         if (taskId) {
-          this.deleteTaskItem(taskId);
+          void this.deleteTaskItem(taskId);
         }
       }
     });
   }
 
-  private async handleTaskSubmit(form: HTMLElement) {
+  private async handleTaskSubmit(form: HTMLFormElement) {
     const title = (form.querySelector('#task-title') as HTMLInputElement).value.trim();
     const description = (form.querySelector('#task-description') as HTMLTextAreaElement).value
       .trim();
     const priority = (form.querySelector('#task-priority') as HTMLSelectElement)
       .value as 'low' | 'medium' | 'high';
-    const duration = parseInt((form.querySelector('#task-duration') as HTMLInputElement).value);
+    const duration = parseInt((form.querySelector('#task-duration') as HTMLInputElement).value, 10);
 
     if (!title) {
       alert('Please enter a task title');
@@ -186,9 +189,8 @@ export class TaskManager {
     this.tasks.push(newTask);
 
     // Reset form
-    (form.querySelector('input') as HTMLInputElement).value = '';
-    (form.querySelector('textarea') as HTMLTextAreaElement).value = '';
-    form.style.display = 'none';
+    form.reset();
+    form.hidden = true;
 
     this.render();
     this.onTasksChanged?.();

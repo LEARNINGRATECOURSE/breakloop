@@ -4,8 +4,9 @@ export function timeStringToMinutes(timeStr: string): number {
 }
 
 export function minutesToTimeString(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
+  const total = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
@@ -56,7 +57,27 @@ export function getCurrentDayOfWeek(): number {
   return new Date().getDay();
 }
 
+// Local calendar date as "YYYY-MM-DD" (not UTC, unlike toISOString)
+export function getLocalDateKey(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Timestamp for a "minutes since midnight" value on the same local day as `date`
+export function minutesToTimestamp(minutes: number, date: Date = new Date()): number {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() + minutes * 60 * 1000;
+}
+
+export function isValidTimeString(timeStr: string | undefined | null): timeStr is string {
+  return typeof timeStr === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr);
+}
+
 export function formatDuration(minutes: number): string {
+  minutes = Math.max(0, Math.round(minutes));
   if (minutes < 60) {
     return `${minutes}m`;
   }

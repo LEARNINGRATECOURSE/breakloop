@@ -207,7 +207,7 @@ export class WeeklySchedule {
     const name = rule.name.trim() || KIND_LABELS[rule.kind].label;
     return `
       <li class="rule-item">
-        <span class="rule-color" style="background-color: ${rule.color}" aria-hidden="true"></span>
+        <span class="rule-color" aria-hidden="true"></span>
         <span class="rule-info">
           <strong>${escapeHtml(name)}</strong>
           <span>${KIND_LABELS[rule.kind].icon} ${describeRule(rule)}${rule.countAsWork ? '' : ' · not work time'}</span>

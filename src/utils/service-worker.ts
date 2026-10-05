@@ -66,11 +66,42 @@ export async function sendNotification(title: string, options?: NotificationOpti
   }
 }
 
+export type SoundType = 'chime' | 'beep' | 'marimba';
+
+export const SOUND_OPTIONS: { value: SoundType; label: string; hint: string }[] = [
+  { value: 'chime', label: 'Chime', hint: 'Soft two-note bell' },
+  { value: 'beep', label: 'Beep', hint: 'Short classic beep' },
+  { value: 'marimba', label: 'Marimba', hint: 'Warm rising notes' },
+];
+
 let audioContext: AudioContext | null = null;
 
-export function playNotificationSound() {
-  // Simple beep using Web Audio API. Reuse one context: browsers cap how many
-  // can be open at once, so creating one per beep eventually fails.
+interface Note {
+  freq: number;
+  at: number; // seconds from now
+  length: number;
+  wave: OscillatorType;
+  gain: number;
+}
+
+const SOUNDS: Record<SoundType, Note[]> = {
+  chime: [
+    { freq: 880, at: 0, length: 0.9, wave: 'sine', gain: 0.3 },
+    { freq: 1318.5, at: 0.18, length: 1.1, wave: 'sine', gain: 0.22 },
+  ],
+  beep: [
+    { freq: 800, at: 0, length: 0.5, wave: 'sine', gain: 0.3 },
+  ],
+  marimba: [
+    { freq: 523.25, at: 0, length: 0.45, wave: 'triangle', gain: 0.35 },
+    { freq: 659.25, at: 0.15, length: 0.45, wave: 'triangle', gain: 0.35 },
+    { freq: 783.99, at: 0.3, length: 0.7, wave: 'triangle', gain: 0.35 },
+  ],
+};
+
+/** Play one of the built-in notification sounds. `volume` is 0-100. */
+export function playNotificationSound(type: SoundType = 'chime', volume = 70) {
+  // Reuse one AudioContext: browsers cap how many can be open at once.
   const AudioCtx =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -83,20 +114,23 @@ export function playNotificationSound() {
       void ctx.resume();
     }
 
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
+    const master = Math.max(0, Math.min(100, volume)) / 100;
+    for (const note of SOUNDS[type] ?? SOUNDS.chime) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = note.wave;
+      osc.frequency.value = note.freq;
 
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-
-    oscillator.frequency.value = 800; // Hz
-    oscillator.type = 'sine';
-
-    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.5);
+      const t0 = ctx.currentTime + note.at;
+      const peak = Math.max(0.0002, note.gain * master);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + note.length);
+      osc.start(t0);
+      osc.stop(t0 + note.length + 0.05);
+    }
   } catch (error) {
     console.error('Failed to play sound:', error);
   }

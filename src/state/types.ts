@@ -70,6 +70,8 @@ export interface Settings {
   breakDurationMinutes: number;
   notificationsEnabled: boolean;
   soundEnabled: boolean;
+  soundType: 'chime' | 'beep' | 'marimba';
+  soundVolume: number; // 0-100
   theme: ThemeMode;
   accent: AccentColor;
   timeFormat: '12h' | '24h';

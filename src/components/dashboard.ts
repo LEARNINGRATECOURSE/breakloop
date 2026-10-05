@@ -120,8 +120,8 @@ export class Dashboard {
 
           <section class="next-break-section" aria-live="polite">
             <div class="next-break-card">
-              <h3 id="next-break-title">Next Break</h3>
-              <p class="break-time" id="next-break-countdown"></p>
+              <h3 id="next-break-title" class="sr-only">Next Break</h3>
+              <p class="break-time sr-only" id="next-break-countdown"></p>
               <div id="next-break-body"></div>
             </div>
           </section>
@@ -165,7 +165,11 @@ export class Dashboard {
 
     let titleText: string;
     let countdownText: string;
+    let detailText: string;
     let bodyHtml: string;
+
+    const detailFor = (b: Break) =>
+      `Break ${breaks.indexOf(b) + 1} · ${formatTimeOfDay(b.startTime)} · ${b.duration}m`;
 
     if (current) {
       const entry = log[current.id];
@@ -174,8 +178,8 @@ export class Dashboard {
       countdownText = snoozed
         ? `resumes in ${formatCountdown(entry!.snoozedUntil! - now)}`
         : `ends in ${formatCountdown(endOf(current) - now)}`;
+      detailText = detailFor(current);
       bodyHtml = `
-        <p class="break-type">Break ${breaks.indexOf(current) + 1} • ${formatTimeOfDay(current.startTime)} • ${current.duration}m</p>
         <div class="break-card-actions">
           <button class="btn btn-primary btn-small" data-action="complete-break" data-break-id="${current.id}">Complete</button>
           <button class="btn btn-secondary btn-small" data-action="snooze-break" data-break-id="${current.id}">Snooze ${this.data.settings.snoozeMinutes}m</button>
@@ -185,23 +189,32 @@ export class Dashboard {
     } else if (next) {
       titleText = 'Next Break';
       countdownText = `in ${formatCountdown(startOf(next) - now)}`;
-      bodyHtml = `
-        <p class="break-type">Break ${breaks.indexOf(next) + 1} at ${formatTimeOfDay(next.startTime)} • ${next.duration}m</p>
-        <div class="break-card-actions">
-          <button class="btn btn-secondary btn-small" data-action="skip-break" data-break-id="${next.id}">Skip</button>
-        </div>
-      `;
+      detailText = detailFor(next);
+      bodyHtml = ''; // each break in the list has its own Skip
     } else if (breaks.length === 0) {
-      titleText = 'Next Break';
+      const dayOff = !this.data.isWorkday;
+      titleText = dayOff ? 'Day off' : 'No breaks';
       countdownText = '';
-      bodyHtml = `<p class="no-breaks">${
-        this.data.isWorkday ? 'No breaks scheduled for today' : 'Today is not a workday'
-      }</p>`;
+      detailText = dayOff ? 'Enjoy your day off' : 'Nothing scheduled today';
+      bodyHtml = dayOff
+        ? `<p class="no-breaks">Working today anyway?</p>
+           <div class="break-card-actions">
+             <button class="btn btn-primary btn-small" data-action="work-today">Turn on breaks for today</button>
+           </div>`
+        : '';
     } else {
       titleText = 'All Done';
       countdownText = '';
-      bodyHtml = '<p class="no-breaks">No more breaks today. Nice work!</p>';
+      detailText = 'No more breaks today. Nice work!';
+      bodyHtml = '';
     }
+
+    this.clock?.setCenter({
+      eyebrow: countdownText ? titleText.toUpperCase() : '',
+      headline: countdownText || titleText,
+      detail: detailText,
+    });
+    this.container.querySelector('.next-break-card')?.classList.toggle('empty', bodyHtml === '');
 
     if (title.textContent !== titleText) title.textContent = titleText;
     if (countdown.textContent !== countdownText) countdown.textContent = countdownText;
@@ -244,7 +257,7 @@ export class Dashboard {
 
             return `
           <li class="break-item ${stateClass}">
-            <span class="break-number" style="background-color: ${b.color}">${i + 1}</span>
+            <span class="break-number">${i + 1}</span>
             <span class="break-info">
               <strong>${formatTimeOfDay(b.startTime)} – ${formatTimeOfDay(minutesToTimeString(start + b.duration))}</strong>
               ${b.name} • ${b.duration}m${statusLabel ? ` <span class="break-status">${statusLabel}</span>` : ''}

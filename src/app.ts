@@ -2,6 +2,7 @@ import { Dashboard } from './components/dashboard';
 import { TaskManager } from './components/task-manager';
 import { FocusTimer } from './components/focus-timer';
 import { WeeklySchedule } from './components/weekly-schedule';
+import { ToastManager } from './components/toast-manager';
 import {
   previewTime,
   renderSettingsSections,
@@ -23,9 +24,9 @@ import {
 } from './utils/storage';
 import { generateBreaksForDay, legacyRules } from './utils/schedule-engine';
 import { getCurrentDayOfWeek, getLocalDateKey, setTimeConfig } from './utils/time-calculations';
-import { NotificationManager } from './utils/notification-manager';
-import { playNotificationSound, sendNotification } from './utils/service-worker';
-import { AppState, BreakLogEntry, BreakSchedule, BreakStatus, Settings } from './state/types';
+import { NotificationManager, describeReminder } from './utils/notification-manager';
+import { playNotificationSound, sendNotification, SoundType } from './utils/service-worker';
+import { AppState, Break, BreakLogEntry, BreakSchedule, BreakStatus, Settings } from './state/types';
 
 type ModalView = 'tasks' | 'focus' | 'schedule' | 'settings' | 'help';
 
@@ -35,6 +36,7 @@ export class App {
   private notifications: NotificationManager | null = null;
   private focusTimer = new FocusTimer();
   private weeklySchedule: WeeklySchedule | null = null;
+  private toasts = new ToastManager((id, action) => this.handleToastAction(id, action));
   private todayHours = { start: DEFAULT_SETTINGS.workingHoursStart, end: DEFAULT_SETTINGS.workingHoursEnd, isWorkday: true };
   private modal: HTMLElement | null = null;
   private modalView: ModalView | null = null;
@@ -69,6 +71,7 @@ export class App {
     this.applyTimeConfig();
 
     this.notifications = new NotificationManager(this.state.settings);
+    this.notifications.setOnReminder((b, snoozed) => this.showBreakToast(b, snoozed));
     this.focusTimer.setOnComplete(() => this.handleFocusComplete());
 
     this.dashboard = new Dashboard(this.appContainer);
@@ -102,12 +105,57 @@ export class App {
       this.state.breakLog = {};
     }
 
+    // A day off you're working anyway: use the default hours and breaks for today only
+    if (schedule.isWorkday === false && this.isWorkingToday()) {
+      schedule = this.defaultSchedule(dayOfWeek);
+    }
     this.todayHours = {
       start: schedule.startTime,
       end: schedule.endTime,
       isWorkday: schedule.isWorkday !== false,
     };
     this.state.todayBreaks = generateBreaksForDay(schedule, this.state.settings);
+  }
+
+  private isWorkingToday(): boolean {
+    try {
+      return localStorage.getItem('breakloop.workingToday') === this.state.today;
+    } catch {
+      return false;
+    }
+  }
+
+  private setWorkingToday(on: boolean) {
+    try {
+      if (on) localStorage.setItem('breakloop.workingToday', this.state.today);
+      else localStorage.removeItem('breakloop.workingToday');
+    } catch {
+      /* private mode: the override just won't persist across reloads */
+    }
+    void this.loadToday().then(() => this.render());
+  }
+
+  private showBreakToast(b: Break, snoozed: boolean) {
+    const { reminderLeadMinutes, snoozeMinutes } = this.state.settings;
+    this.toasts.show({
+      id: `break:${b.id}`,
+      title: snoozed ? 'Break time!' : `Time for a break`,
+      body: describeReminder(b, snoozed, reminderLeadMinutes),
+      actions: [
+        { label: 'Complete', action: 'complete', primary: true },
+        { label: `Snooze ${snoozeMinutes}m`, action: 'snooze' },
+        { label: 'Skip', action: 'skip' },
+      ],
+    });
+  }
+
+  private handleToastAction(toastId: string, action: string) {
+    if (!toastId.startsWith('break:')) return;
+    const breakId = toastId.slice('break:'.length);
+    const status = { complete: 'completed', snooze: 'snoozed', skip: 'skipped' }[action] as
+      | BreakStatus
+      | undefined;
+    if (status) void this.setBreakStatus(breakId, status);
   }
 
   private defaultSchedule(dayOfWeek: number): BreakSchedule {
@@ -149,6 +197,9 @@ export class App {
       const breakId = target.dataset.breakId;
 
       switch (target.dataset.action) {
+        case 'work-today':
+          this.setWorkingToday(true);
+          break;
         case 'open-focus':
           this.openModal('focus');
           break;
@@ -294,6 +345,24 @@ export class App {
 
     modal.addEventListener('click', (e) => {
       const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+      if (action === 'test-sound' || action === 'test-popup') {
+        const form = (e.target as HTMLElement).closest('#settings-form');
+        const volume = Number(form?.querySelector<HTMLInputElement>('#sound-volume')?.value ?? 70);
+        const chosen = form?.querySelector<HTMLInputElement>('input[name="sound-type"]:checked')?.value;
+        const sound = ((e.target as HTMLElement).closest<HTMLElement>('[data-sound]')?.dataset.sound ??
+          chosen ??
+          'chime') as SoundType;
+        playNotificationSound(sound, volume);
+        if (action === 'test-popup') {
+          this.toasts.show({
+            id: 'test',
+            title: 'Time for a break',
+            body: 'This is what break reminders look like.',
+            actions: [{ label: 'Got it', action: 'dismiss', primary: true }],
+            durationMs: 8000,
+          });
+        }
+      }
       if (action === 'export-data') void this.exportData();
       if (action === 'reset-data') void this.resetData();
     });
@@ -462,9 +531,18 @@ export class App {
 
   private handleFocusComplete() {
     if (this.state.settings.soundEnabled) {
-      playNotificationSound();
+      playNotificationSound(this.state.settings.soundType, this.state.settings.soundVolume);
     }
     if (this.state.settings.notificationsEnabled) {
+      if (!document.hidden) {
+        this.toasts.show({
+          id: 'focus-complete',
+          title: 'Focus session complete',
+          body: 'Nice work! Time to take a break.',
+          actions: [{ label: 'Got it', action: 'dismiss', primary: true }],
+        });
+        return;
+      }
       void sendNotification('Focus session complete', {
         body: 'Nice work! Time to take a break.',
         icon: '/icon-192.png',

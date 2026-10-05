@@ -14,36 +14,22 @@ export default defineConfig({
         orientation: 'portrait-primary',
         icons: [
           {
-            src: '/icon-192.png',
-            sizes: '192x192',
-            type: 'image/png',
+            src: '/icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
             purpose: 'any',
-          },
-          {
-            src: '/icon-512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable',
-          },
-        ],
-        screenshots: [
-          {
-            src: '/screenshot-540x720.png',
-            sizes: '540x720',
-            type: 'image/png',
-            form_factor: 'narrow',
-          },
-          {
-            src: '/screenshot-1280x720.png',
-            sizes: '1280x720',
-            type: 'image/png',
-            form_factor: 'wide',
           },
         ],
       },
       strategies: 'injectManifest',
+      srcDir: 'src',
       filename: 'service-worker.ts',
-      injectRegister: 'auto',
+      // Registered manually in src/utils/service-worker.ts (production only)
+      injectRegister: false,
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,webmanifest}'],
+        rollupFormat: 'iife',
+      },
     }),
   ],
   server: {

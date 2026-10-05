@@ -1,8 +1,8 @@
 import { Break, BreakSchedule, Settings } from '../state/types';
 import {
   timeStringToMinutes,
-  getCurrentTimeInMinutes,
-  getCurrentDayOfWeek,
+  minutesToTimeString,
+  getSecondsSinceMidnight,
 } from './time-calculations';
 
 const BREAK_COLORS: Record<Break['type'], string> = {
@@ -15,8 +15,13 @@ const BREAK_COLORS: Record<Break['type'], string> = {
   'custom': '#C9ADA7',
 };
 
+/**
+ * Generate breaks for a working day. A break starts every `breakFrequencyMinutes`
+ * after the start of the workday (the first one after the first work block, not
+ * at the very start). Breaks that overlap lunch or run past the end are dropped.
+ */
 export function generateBreaksForDay(
-  schedule: BreakSchedule,
+  schedule: BreakSchedule | undefined,
   settings: Settings
 ): Break[] {
   if (!schedule) {
@@ -29,54 +34,59 @@ export function generateBreaksForDay(
   const breakFreq = settings.breakFrequencyMinutes;
   const breakDuration = settings.breakDurationMinutes;
 
-  let currentTime = startMinutes;
+  if (
+    !Number.isFinite(startMinutes) ||
+    !Number.isFinite(endMinutes) ||
+    endMinutes <= startMinutes ||
+    !(breakFreq > 0) ||
+    !(breakDuration > 0)
+  ) {
+    return [];
+  }
 
-  // Skip lunch break if defined
-  const lunchStart = schedule.lunchStart
-    ? timeStringToMinutes(schedule.lunchStart)
-    : null;
-  const lunchEnd = schedule.lunchEnd
-    ? timeStringToMinutes(schedule.lunchEnd)
-    : null;
+  const lunchStart = schedule.lunchStart ? timeStringToMinutes(schedule.lunchStart) : null;
+  const lunchEnd = schedule.lunchEnd ? timeStringToMinutes(schedule.lunchEnd) : null;
 
-  while (currentTime + breakDuration <= endMinutes) {
-    // Skip if this break falls during lunch
-    if (lunchStart && lunchEnd) {
-      if (currentTime >= lunchStart && currentTime < lunchEnd) {
-        currentTime += breakFreq;
+  for (
+    let breakStart = startMinutes + breakFreq;
+    breakStart + breakDuration <= endMinutes;
+    breakStart += breakFreq
+  ) {
+    const breakEnd = breakStart + breakDuration;
+
+    // Skip breaks that overlap lunch
+    if (lunchStart !== null && lunchEnd !== null) {
+      if (breakStart < lunchEnd && breakEnd > lunchStart) {
         continue;
       }
     }
 
-    const breakStartMinutes = currentTime;
-    const breakEndMinutes = currentTime + breakDuration;
-
-    // Make sure break doesn't extend past end time
-    if (breakEndMinutes <= endMinutes) {
-      const breakObj: Break = {
-        id: `break-${Date.now()}-${Math.random()}`,
-        name: `Break`,
-        startTime: minutesToTimeString(breakStartMinutes),
-        duration: breakDuration,
-        type: 'short',
-        color: BREAK_COLORS['short'],
-      };
-      breaks.push(breakObj);
-    }
-
-    currentTime += breakFreq;
+    const startTime = minutesToTimeString(breakStart);
+    breaks.push({
+      // Stable id so per-break state (completed/skipped) survives re-generation
+      id: `break-${startTime}`,
+      name: 'Break',
+      startTime,
+      duration: breakDuration,
+      type: 'short',
+      color: BREAK_COLORS['short'],
+    });
   }
 
   return breaks;
 }
 
+function nowInMinutes(): number {
+  return getSecondsSinceMidnight() / 60;
+}
+
 export function findNextBreak(breaks: Break[]): Break | null {
-  const now = getCurrentTimeInMinutes();
+  const now = nowInMinutes();
   return breaks.find(b => timeStringToMinutes(b.startTime) > now) || null;
 }
 
 export function getCurrentBreak(breaks: Break[]): Break | null {
-  const now = getCurrentTimeInMinutes();
+  const now = nowInMinutes();
   return breaks.find(b => {
     const startMin = timeStringToMinutes(b.startTime);
     const endMin = startMin + b.duration;
@@ -90,10 +100,4 @@ export function getBreakAtIndex(breaks: Break[], index: number): Break | null {
 
 export function getBreakNumber(breaks: Break[], breakId: string): number {
   return breaks.findIndex(b => b.id === breakId) + 1;
-}
-
-function minutesToTimeString(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }

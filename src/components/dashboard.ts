@@ -1,7 +1,7 @@
-import { AnalogBreakClock } from './analog-break-clock';
+import { AnalogBreakClock, ClockFocus, ClockTask } from './analog-break-clock';
 import { renderSettingsFields } from './settings-form';
 import { netWorkMinutes } from '../utils/schedule-engine';
-import { Break, BreakLogEntry, Settings } from '../state/types';
+import { Break, BreakLogEntry, Settings, Task } from '../state/types';
 import {
   timeStringToMinutes,
   minutesToTimestamp,
@@ -16,6 +16,8 @@ export interface DashboardData {
   workStart: string; // today's hours (may differ from the global settings)
   workEnd: string;
   isWorkday: boolean;
+  tasks: Task[]; // tasks scheduled for today
+  focus: ClockFocus[]; // today's focus sessions
   log: Record<string, BreakLogEntry>;
 }
 
@@ -84,6 +86,7 @@ export class Dashboard {
       )} of work time`;
     }
 
+    this.clock?.setOverlays(data.focus, this.clockTasks(data.tasks));
     this.update();
   }
 
@@ -91,7 +94,21 @@ export class Dashboard {
   public update() {
     if (!this.data || !this.data.settings.onboarded) return;
     this.updateNextBreak();
+    this.updateTasksToday();
     setHtml(this.container.querySelector('#breaks-list'), this.renderBreaksList());
+  }
+
+  /** Push the latest focus sessions (including a running one) to the clock. */
+  public setFocusSessions(focus: ClockFocus[]) {
+    if (!this.data) return;
+    this.data = { ...this.data, focus };
+    this.clock?.setOverlays(focus, this.clockTasks(this.data.tasks));
+  }
+
+  private clockTasks(tasks: Task[]): ClockTask[] {
+    return tasks
+      .filter((t) => t.scheduledTime)
+      .map((t) => ({ title: t.title, time: t.scheduledTime!, done: t.completed }));
   }
 
   public setFocusLabel(label: string | null) {
@@ -116,6 +133,11 @@ export class Dashboard {
             <h2 id="clock-heading">Your Break Schedule</h2>
             <p class="working-hours" id="working-hours"></p>
             <div id="clock-container" class="clock-container"></div>
+            <p class="clock-legend" aria-hidden="true">
+              <span><i class="lg-break"></i>Break</span>
+              <span><i class="lg-focus"></i>Focus ✓</span>
+              <span><i class="lg-task"></i>Task</span>
+            </p>
           </section>
 
           <section class="next-break-section" aria-live="polite">
@@ -131,6 +153,11 @@ export class Dashboard {
             <button class="btn btn-secondary" data-action="open-tasks">View Tasks</button>
           </section>
 
+          <section class="tasks-today" id="tasks-today" hidden>
+            <h3>Today's Tasks</h3>
+            <ul class="tasks-today-items" id="tasks-today-items"></ul>
+          </section>
+
           <section class="breaks-list">
             <h3>Today's Breaks</h3>
             <div id="breaks-list"></div>
@@ -144,6 +171,28 @@ export class Dashboard {
         </footer>
       </div>
     `;
+  }
+
+  private updateTasksToday() {
+    if (!this.data) return;
+    const scheduled = this.data.tasks
+      .filter((t) => t.scheduledTime)
+      .sort((a, b) => timeStringToMinutes(a.scheduledTime!) - timeStringToMinutes(b.scheduledTime!));
+    const section = this.container.querySelector<HTMLElement>('#tasks-today');
+    if (section) section.hidden = scheduled.length === 0;
+    const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    setHtml(
+      this.container.querySelector('#tasks-today-items'),
+      scheduled
+        .map(
+          (t) => `<li class="${t.completed ? 'done' : ''}">
+            <span class="task-time">${formatTimeOfDay(t.scheduledTime!)}</span>
+            <span class="task-name">${esc(t.title)}</span>
+            ${t.duration ? `<span class="task-dur">${t.duration}m</span>` : ''}
+          </li>`
+        )
+        .join('')
+    );
   }
 
   private updateNextBreak() {

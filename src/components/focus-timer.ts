@@ -1,8 +1,25 @@
 export type FocusMode = 'pomodoro' | 'deep' | 'flow';
 
+export type ConflictResolution = 'move' | 'delete' | 'keep';
+
+export interface FocusStartInfo {
+  mode: FocusMode;
+  duration: number; // minutes
+  startedAt: number; // timestamp
+  resolution: ConflictResolution;
+}
+
+export interface FocusEndInfo {
+  mode: FocusMode;
+  startedAt: number;
+  endedAt: number;
+  completed: boolean;
+}
+
 interface FocusSession {
   mode: FocusMode;
   duration: number; // minutes
+  startedAt: number; // timestamp the session began (never shifted)
   startTime: number; // timestamp (shifted forward by time spent paused)
   isPaused: boolean;
   pausedAt?: number;
@@ -26,6 +43,10 @@ export class FocusTimer {
   private summary: SessionSummary | null = null;
   private timerId: number | null = null;
   private onComplete: ((mode: FocusMode) => void) | null = null;
+  private onStart: ((info: FocusStartInfo) => void) | null = null;
+  private onEnd: ((info: FocusEndInfo) => void) | null = null;
+  private conflictProvider: ((durationMinutes: number) => string[]) | null = null;
+  private pending: { mode: FocusMode; conflicts: string[] } | null = null;
   private modes: Record<FocusMode, number> = {
     pomodoro: 25,
     deep: 50,
@@ -54,6 +75,29 @@ export class FocusTimer {
     this.onComplete = callback;
   }
 
+  /** Labels of the breaks that would fall inside a session of this length starting now. */
+  public setConflictProvider(provider: (durationMinutes: number) => string[]) {
+    this.conflictProvider = provider;
+  }
+
+  public setOnStart(callback: (info: FocusStartInfo) => void) {
+    this.onStart = callback;
+  }
+
+  public setOnEnd(callback: (info: FocusEndInfo) => void) {
+    this.onEnd = callback;
+  }
+
+  /** Wall-clock window of the running session, for drawing it on the clock. */
+  public getActiveWindow(): { startedAt: number; plannedEnd: number; paused: boolean } | null {
+    if (!this.session) return null;
+    return {
+      startedAt: this.session.startedAt,
+      plannedEnd: this.session.startTime + this.session.duration * 60000, // startTime already includes paused time
+      paused: this.session.isPaused,
+    };
+  }
+
   public isRunning(): boolean {
     return this.session !== null;
   }
@@ -69,6 +113,8 @@ export class FocusTimer {
     if (!this.container) return;
     if (this.session) {
       this.renderActiveSession();
+    } else if (this.pending) {
+      this.renderConflict();
     } else if (this.summary) {
       this.renderSummary();
     } else {
@@ -82,7 +128,18 @@ export class FocusTimer {
 
     switch (target.dataset.focusAction) {
       case 'start':
-        this.startSession(target.dataset.mode as FocusMode);
+        this.requestStart(target.dataset.mode as FocusMode);
+        break;
+      case 'resolve':
+        if (this.pending) {
+          const { mode } = this.pending;
+          this.pending = null;
+          this.startSession(mode, target.dataset.resolution as ConflictResolution);
+        }
+        break;
+      case 'cancel-start':
+        this.pending = null;
+        this.render();
         break;
       case 'pause':
         this.togglePause();
@@ -96,6 +153,44 @@ export class FocusTimer {
         break;
     }
   };
+
+  private requestStart(mode: FocusMode) {
+    if (!(mode in this.modes)) return;
+    const conflicts = this.conflictProvider?.(this.modes[mode]) ?? [];
+    if (conflicts.length === 0) {
+      this.startSession(mode, 'keep');
+      return;
+    }
+    this.pending = { mode, conflicts };
+    this.render();
+  }
+
+  /** Breaks can't happen inside a focus session: ask what to do with the ones in the way. */
+  private renderConflict() {
+    if (!this.pending) return;
+    const { mode, conflicts } = this.pending;
+    const minutes = this.modes[mode];
+    const n = conflicts.length;
+    this.container!.innerHTML = `
+      <div class="focus-timer">
+        <h2>Breaks in the way</h2>
+        <p class="focus-subtitle">
+          ${n === 1 ? 'A break falls' : `${n} breaks fall`} inside this ${minutes} minute ${MODE_LABELS[mode]} session:
+        </p>
+        <ul class="conflict-list">${conflicts.map((c) => `<li>${c}</li>`).join('')}</ul>
+        <div class="conflict-actions">
+          <button class="btn btn-primary" data-focus-action="resolve" data-resolution="move">
+            Move ${n === 1 ? 'it' : 'the first'} to after the session
+          </button>
+          <button class="btn btn-secondary" data-focus-action="resolve" data-resolution="delete">
+            Delete ${n === 1 ? 'it' : 'them'}
+          </button>
+          <button class="btn btn-secondary" data-focus-action="cancel-start">Cancel</button>
+        </div>
+        ${n > 1 ? '<p class="focus-note">Only the first break is moved; the rest are removed so breaks don\'t pile up.</p>' : ''}
+      </div>
+    `;
+  }
 
   private renderStartScreen() {
     this.container!.innerHTML = `
@@ -227,16 +322,19 @@ export class FocusTimer {
     }
   }
 
-  private startSession(mode: FocusMode) {
+  private startSession(mode: FocusMode, resolution: ConflictResolution) {
     if (!(mode in this.modes)) return;
 
+    const now = Date.now();
     this.summary = null;
     this.session = {
       mode,
       duration: this.modes[mode],
-      startTime: Date.now(),
+      startedAt: now,
+      startTime: now,
       isPaused: false,
     };
+    this.onStart?.({ mode, duration: this.modes[mode], startedAt: now, resolution });
 
     this.startTicking();
     this.render();
@@ -269,7 +367,9 @@ export class FocusTimer {
         focusedMinutes: Math.floor(this.getElapsedMs() / 60000),
         completed,
       };
+      const startedAt = this.session.startedAt;
       this.session = null;
+      this.onEnd?.({ mode, startedAt, endedAt: Date.now(), completed });
       if (completed) {
         this.onComplete?.(mode);
       }

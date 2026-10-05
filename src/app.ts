@@ -1,6 +1,7 @@
 import { Dashboard } from './components/dashboard';
 import { TaskManager } from './components/task-manager';
-import { FocusTimer } from './components/focus-timer';
+import { FocusTimer, ConflictResolution } from './components/focus-timer';
+import type { ClockFocus } from './components/analog-break-clock';
 import { WeeklySchedule } from './components/weekly-schedule';
 import { ToastManager } from './components/toast-manager';
 import {
@@ -20,13 +21,26 @@ import {
   deleteBreakLogEntry,
   DEFAULT_SETTINGS,
   exportAllData,
+  getTasks,
+  updateTask,
+  getFocusLogForDate,
+  saveFocusLogEntry,
   resetAllData,
 } from './utils/storage';
 import { generateBreaksForDay, legacyRules } from './utils/schedule-engine';
-import { getCurrentDayOfWeek, getLocalDateKey, setTimeConfig } from './utils/time-calculations';
+import {
+  formatTimeOfDay,
+  getCurrentDayOfWeek,
+  getLocalDateKey,
+  getSecondsSinceMidnight,
+  minutesToTimeString,
+  minutesToTimestamp,
+  setTimeConfig,
+  timeStringToMinutes,
+} from './utils/time-calculations';
 import { NotificationManager, describeReminder } from './utils/notification-manager';
 import { playNotificationSound, sendNotification, SoundType } from './utils/service-worker';
-import { AppState, Break, BreakLogEntry, BreakSchedule, BreakStatus, Settings } from './state/types';
+import { AppState, Break, BreakLogEntry, FocusModeId, BreakSchedule, BreakStatus, Settings } from './state/types';
 
 type ModalView = 'tasks' | 'focus' | 'schedule' | 'settings' | 'help';
 
@@ -36,6 +50,7 @@ export class App {
   private notifications: NotificationManager | null = null;
   private focusTimer = new FocusTimer();
   private weeklySchedule: WeeklySchedule | null = null;
+  private firedTasks = new Set<string>();
   private toasts = new ToastManager((id, action) => this.handleToastAction(id, action));
   private todayHours = { start: DEFAULT_SETTINGS.workingHoursStart, end: DEFAULT_SETTINGS.workingHoursEnd, isWorkday: true };
   private modal: HTMLElement | null = null;
@@ -48,6 +63,7 @@ export class App {
     tasks: [],
     todayBreaks: [],
     breakLog: {},
+    focusLog: [],
     today: getLocalDateKey(),
   };
 
@@ -73,6 +89,14 @@ export class App {
     this.notifications = new NotificationManager(this.state.settings);
     this.notifications.setOnReminder((b, snoozed) => this.showBreakToast(b, snoozed));
     this.focusTimer.setOnComplete(() => this.handleFocusComplete());
+    this.focusTimer.setConflictProvider((minutes) =>
+      this.findFocusConflicts(minutes).map(
+        ({ b, index }) =>
+          `Break ${index + 1} · ${formatTimeOfDay(b.startTime)} · ${b.duration}m`
+      )
+    );
+    this.focusTimer.setOnStart(({ duration, resolution }) => void this.applyFocusResolution(duration, resolution));
+    this.focusTimer.setOnEnd((info) => void this.recordFocusSession(info));
 
     this.dashboard = new Dashboard(this.appContainer);
     this.createModal();
@@ -99,6 +123,8 @@ export class App {
 
       const entries = await getBreakLogForDate(this.state.today);
       this.state.breakLog = Object.fromEntries(entries.map((e) => [e.breakId, e]));
+      this.state.focusLog = await getFocusLogForDate(this.state.today);
+      this.state.tasks = (await getTasks()).filter((t) => t.scheduledDate === this.state.today);
     } catch (error) {
       console.error('Failed to load schedule:', error);
       schedule ??= this.defaultSchedule(dayOfWeek);
@@ -114,7 +140,157 @@ export class App {
       end: schedule.endTime,
       isWorkday: schedule.isWorkday !== false,
     };
-    this.state.todayBreaks = generateBreaksForDay(schedule, this.state.settings);
+    this.state.todayBreaks = this.applyAdjustments(
+      generateBreaksForDay(schedule, this.state.settings),
+      schedule.endTime
+    );
+  }
+
+  // ---- Focus sessions vs breaks ----
+
+  private readAdjustments(): { moved: Record<string, string>; removed: string[] } {
+    try {
+      const raw = JSON.parse(localStorage.getItem('breakloop.adjust') ?? 'null');
+      if (raw?.date === this.state.today) return { moved: raw.moved ?? {}, removed: raw.removed ?? [] };
+    } catch {
+      /* ignore */
+    }
+    return { moved: {}, removed: [] };
+  }
+
+  private writeAdjustments(adj: { moved: Record<string, string>; removed: string[] }) {
+    try {
+      localStorage.setItem('breakloop.adjust', JSON.stringify({ date: this.state.today, ...adj }));
+    } catch {
+      /* private mode: adjustments last until reload */
+    }
+  }
+
+  /** Apply today's focus-session changes (moved/removed breaks) on top of the generated breaks. */
+  private applyAdjustments(breaks: Break[], workEnd: string): Break[] {
+    const adj = this.readAdjustments();
+    const kept = breaks.filter((b) => !adj.removed.includes(b.id));
+    const fixed = kept.filter((b) => !(b.id in adj.moved));
+    const result = [...fixed];
+    const end = timeStringToMinutes(workEnd);
+    for (const b of kept.filter((x) => x.id in adj.moved)) {
+      const start = timeStringToMinutes(adj.moved[b.id]);
+      const overlaps = result.some((o) => {
+        const os = timeStringToMinutes(o.startTime);
+        return start < os + o.duration && start + b.duration > os;
+      });
+      if (start + b.duration <= end && !overlaps) {
+        result.push({ ...b, startTime: adj.moved[b.id] });
+      }
+    }
+    return result.sort((a, b) => timeStringToMinutes(a.startTime) - timeStringToMinutes(b.startTime));
+  }
+
+  /** Pending breaks that would overlap a focus session starting now. */
+  private findFocusConflicts(durationMinutes: number): { b: Break; index: number }[] {
+    const from = getSecondsSinceMidnight() / 60;
+    const to = from + durationMinutes;
+    return this.state.todayBreaks
+      .map((b, index) => ({ b, index }))
+      .filter(({ b }) => {
+        const status = this.state.breakLog[b.id]?.status;
+        if (status === 'completed' || status === 'skipped') return false;
+        const s = timeStringToMinutes(b.startTime);
+        return s < to && s + b.duration > from;
+      });
+  }
+
+  private async applyFocusResolution(durationMinutes: number, resolution: ConflictResolution) {
+    if (resolution === 'keep') return;
+    const conflicts = this.findFocusConflicts(durationMinutes);
+    if (conflicts.length === 0) return;
+
+    const adj = this.readAdjustments();
+    const sessionEnd = Math.ceil(getSecondsSinceMidnight() / 60 + durationMinutes);
+    conflicts.forEach(({ b }, i) => {
+      if (resolution === 'move' && i === 0) {
+        adj.moved[b.id] = minutesToTimeString(sessionEnd);
+      } else if (!adj.removed.includes(b.id)) {
+        adj.removed.push(b.id);
+      }
+    });
+    this.writeAdjustments(adj);
+
+    await this.loadToday();
+    this.render();
+
+    const movedId = conflicts[0].b.id;
+    const moved = this.state.todayBreaks.find((b) => b.id === movedId);
+    if (resolution === 'move') {
+      this.toasts.show({
+        id: 'focus-adjust',
+        title: moved ? 'Break moved' : 'Break removed',
+        body: moved
+          ? `Your break now starts at ${formatTimeOfDay(moved.startTime)}, after the focus session.`
+          : 'There was no room for it after the session, so it was removed.',
+        durationMs: 7000,
+      });
+    }
+  }
+
+  private async recordFocusSession(info: { mode: FocusModeId; startedAt: number; endedAt: number; completed: boolean }) {
+    if (info.endedAt - info.startedAt < 60000) return; // too short to mark
+    const entry = {
+      id: `${info.startedAt}`,
+      date: getLocalDateKey(new Date(info.startedAt)),
+      ...info,
+    };
+    if (entry.date === this.state.today) this.state.focusLog = [...this.state.focusLog, entry];
+    try {
+      await saveFocusLogEntry(entry);
+    } catch (error) {
+      console.error('Failed to save focus session:', error);
+    }
+    this.dashboard?.setFocusSessions(this.focusSessions());
+  }
+
+  /** Finished sessions plus the one in progress, for the clock. */
+  private focusSessions(): ClockFocus[] {
+    const sessions: ClockFocus[] = this.state.focusLog.map((f) => ({
+      startedAt: f.startedAt,
+      endedAt: f.endedAt,
+      completed: f.completed,
+    }));
+    const active = this.focusTimer.getActiveWindow();
+    if (active) sessions.push({ startedAt: active.startedAt, endedAt: null, completed: false });
+    return sessions;
+  }
+
+  /** Pop-up when a scheduled task's start time arrives. */
+  private checkTaskReminders() {
+    const now = Date.now();
+    for (const task of this.state.tasks) {
+      if (task.completed || !task.scheduledTime) continue;
+      const due = minutesToTimestamp(timeStringToMinutes(task.scheduledTime));
+      const key = `${this.state.today}|${task.id}`;
+      if (now < due || this.firedTasks.has(key)) continue;
+      this.firedTasks.add(key);
+      if (now - due > 5 * 60 * 1000 || !this.state.settings.notificationsEnabled) continue;
+
+      if (this.state.settings.soundEnabled) {
+        playNotificationSound(this.state.settings.soundType, this.state.settings.soundVolume);
+      }
+      const body = `${formatTimeOfDay(task.scheduledTime)}${task.duration ? ` · ${task.duration} min` : ''}`;
+      if (document.hidden) {
+        void sendNotification(task.title, { body, icon: '/icon-192.png', tag: `task-${task.id}` });
+      } else {
+        this.toasts.show({
+          id: `task:${task.id}`,
+          title: task.title,
+          body: `Time to start · ${body}`,
+          actions: [
+            { label: 'Done', action: 'done', primary: true },
+            { label: 'Later', action: 'dismiss' },
+          ],
+          durationMs: 30000,
+        });
+      }
+    }
   }
 
   private isWorkingToday(): boolean {
@@ -150,6 +326,13 @@ export class App {
   }
 
   private handleToastAction(toastId: string, action: string) {
+    if (toastId.startsWith('task:') && action === 'done') {
+      const id = toastId.slice('task:'.length);
+      void updateTask(id, { completed: true })
+        .then(() => this.loadToday())
+        .then(() => this.render());
+      return;
+    }
     if (!toastId.startsWith('break:')) return;
     const breakId = toastId.slice('break:'.length);
     const status = { complete: 'completed', snooze: 'snoozed', skip: 'skipped' }[action] as
@@ -175,6 +358,8 @@ export class App {
       workStart: this.todayHours.start,
       workEnd: this.todayHours.end,
       isWorkday: this.todayHours.isWorkday,
+      tasks: this.state.tasks,
+      focus: this.focusSessions(),
       log: this.state.breakLog,
     });
   }
@@ -409,6 +594,7 @@ export class App {
       case 'tasks': {
         title.textContent = 'Tasks';
         const taskManager = new TaskManager(body);
+        taskManager.setOnTasksChanged(() => void this.loadToday().then(() => this.render()));
         taskManager
           .load()
           .then(() => {
@@ -605,6 +791,8 @@ export class App {
     }
 
     this.notifications?.check(this.state.todayBreaks, this.state.breakLog, this.state.today);
+    this.checkTaskReminders();
+    this.dashboard?.setFocusSessions(this.focusSessions());
     this.dashboard?.update();
     this.dashboard?.setFocusLabel(this.focusTimer.getRemainingLabel());
   }

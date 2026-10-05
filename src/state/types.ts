@@ -5,8 +5,29 @@ export interface Break {
   duration: number; // minutes
   type: 'short' | 'stretch' | 'water' | 'walk' | 'eye-rest' | 'meal' | 'custom';
   color: string; // hex color
+  countAsWork?: boolean; // true (default): break time still counts towards work time
   completed?: boolean;
   snoozedUntil?: number; // timestamp
+}
+
+/**
+ * How a break rule produces breaks for a day:
+ * - exact: one break at `time`
+ * - count: `count` breaks spread evenly across the workday
+ * - repeated: a break every `everyMinutes` after the start of the workday
+ */
+export type BreakRuleKind = 'exact' | 'count' | 'repeated';
+
+export interface BreakRule {
+  id: string;
+  kind: BreakRuleKind;
+  name: string; // may be empty
+  duration: number; // minutes
+  countAsWork: boolean;
+  color: string; // hex color
+  time?: string; // "HH:mm", kind === 'exact'
+  count?: number; // kind === 'count'
+  everyMinutes?: number; // kind === 'repeated'
 }
 
 export interface BreakSchedule {
@@ -17,6 +38,14 @@ export interface BreakSchedule {
   lunchStart?: string;
   lunchEnd?: string;
   breaks: Break[];
+  isWorkday?: boolean; // default true
+  /**
+   * Break rules for this day. When undefined the day follows the global
+   * settings (one repeated rule from breakFrequencyMinutes/breakDurationMinutes).
+   */
+  rules?: BreakRule[];
+  /** Set once the day was edited in the weekly schedule; global hours no longer overwrite it. */
+  customized?: boolean;
 }
 
 export interface Task {

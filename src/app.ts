@@ -1,6 +1,7 @@
 import { Dashboard } from './components/dashboard';
 import { TaskManager } from './components/task-manager';
 import { FocusTimer } from './components/focus-timer';
+import { WeeklySchedule } from './components/weekly-schedule';
 import { renderSettingsFields, readSettingsFields, showFormError } from './components/settings-form';
 import {
   initializeStorage,
@@ -13,7 +14,7 @@ import {
   deleteBreakLogEntry,
   DEFAULT_SETTINGS,
 } from './utils/storage';
-import { generateBreaksForDay } from './utils/schedule-engine';
+import { generateBreaksForDay, legacyRules } from './utils/schedule-engine';
 import { getCurrentDayOfWeek, getLocalDateKey } from './utils/time-calculations';
 import { NotificationManager } from './utils/notification-manager';
 import { playNotificationSound, sendNotification } from './utils/service-worker';
@@ -21,13 +22,15 @@ import { AppState, BreakLogEntry, BreakSchedule, BreakStatus, Settings } from '.
 
 const SNOOZE_MINUTES = 5;
 
-type ModalView = 'tasks' | 'focus' | 'settings' | 'help';
+type ModalView = 'tasks' | 'focus' | 'schedule' | 'settings' | 'help';
 
 export class App {
   private appContainer: HTMLElement | null = null;
   private dashboard: Dashboard | null = null;
   private notifications: NotificationManager | null = null;
   private focusTimer = new FocusTimer();
+  private weeklySchedule: WeeklySchedule | null = null;
+  private todayHours = { start: DEFAULT_SETTINGS.workingHoursStart, end: DEFAULT_SETTINGS.workingHoursEnd, isWorkday: true };
   private modal: HTMLElement | null = null;
   private modalView: ModalView | null = null;
   private lastFocused: HTMLElement | null = null;
@@ -93,6 +96,11 @@ export class App {
       this.state.breakLog = {};
     }
 
+    this.todayHours = {
+      start: schedule.startTime,
+      end: schedule.endTime,
+      isWorkday: schedule.isWorkday !== false,
+    };
     this.state.todayBreaks = generateBreaksForDay(schedule, this.state.settings);
   }
 
@@ -110,6 +118,9 @@ export class App {
     this.dashboard?.render({
       breaks: this.state.todayBreaks,
       settings: this.state.settings,
+      workStart: this.todayHours.start,
+      workEnd: this.todayHours.end,
+      isWorkday: this.todayHours.isWorkday,
       log: this.state.breakLog,
     });
   }
@@ -137,6 +148,9 @@ export class App {
           break;
         case 'open-tasks':
           this.openModal('tasks');
+          break;
+        case 'open-schedule':
+          this.openModal('schedule');
           break;
         case 'open-settings':
           this.openModal('settings');
@@ -194,6 +208,7 @@ export class App {
 
       for (let day = 0; day < 7; day++) {
         const existing = await getScheduleForDay(day);
+        if (existing?.customized) continue; // edited in the weekly schedule
         await saveSchedule({
           ...(existing ?? this.defaultSchedule(day)),
           startTime: this.state.settings.workingHoursStart,
@@ -307,6 +322,10 @@ export class App {
         title.textContent = 'Focus';
         this.focusTimer.mount(body);
         break;
+      case 'schedule':
+        title.textContent = 'Weekly Schedule';
+        this.loadWeeklySchedule(body, title);
+        break;
       case 'settings':
         title.textContent = 'Settings';
         body.innerHTML = `
@@ -325,6 +344,8 @@ export class App {
             <p><strong>Breaks</strong> are scheduled every N minutes from the start of your day.
             You'll get a reminder one minute before each break. Mark breaks as complete, skip them,
             or snooze a break for ${SNOOZE_MINUTES} minutes.</p>
+            <p><strong>Schedule</strong> lets you set hours, workdays and breaks per day: at an exact time,
+            a number of evenly spaced breaks, or a break that repeats. Copy a day to others in one step.</p>
             <p><strong>Focus sessions</strong> keep running when you close the panel; the button on the
             dashboard shows the time left.</p>
             <p><strong>Privacy:</strong> everything is stored locally in your browser. Nothing is sent anywhere.</p>
@@ -338,12 +359,49 @@ export class App {
     this.modal.querySelector<HTMLElement>('.modal-close')?.focus();
   }
 
+  private async loadWeeklySchedule(body: HTMLElement, title: Element) {
+    const schedules: BreakSchedule[] = [];
+    for (let day = 0; day < 7; day++) {
+      let schedule: BreakSchedule | undefined;
+      try {
+        schedule = await getScheduleForDay(day);
+      } catch (error) {
+        console.error('Failed to load schedule:', error);
+      }
+      schedule ??= this.defaultSchedule(day);
+      // Days that follow the global settings are shown (and saved) as an explicit rule
+      schedule.rules ??= legacyRules(this.state.settings);
+      schedules.push(schedule);
+    }
+    if (this.modalView !== 'schedule') return; // closed while loading
+
+    this.weeklySchedule = new WeeklySchedule(body, schedules, {
+      onTitle: (text) => (title.textContent = text),
+      onClose: () => this.closeModal(),
+      onSave: async (updated) => {
+        try {
+          for (const schedule of updated) {
+            await saveSchedule(schedule);
+          }
+        } catch (error) {
+          console.error('Failed to save schedule:', error);
+        }
+        await this.loadToday();
+        this.render();
+        this.closeModal();
+      },
+    });
+    this.weeklySchedule.render();
+  }
+
   private closeModal() {
     if (!this.modal || !this.modalView) return;
 
     if (this.modalView === 'focus') {
       this.focusTimer.unmount();
     }
+    this.weeklySchedule?.destroy();
+    this.weeklySchedule = null;
 
     this.modalView = null;
     this.modal.hidden = true;

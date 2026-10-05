@@ -1,15 +1,20 @@
 import { AnalogBreakClock } from './analog-break-clock';
 import { renderSettingsFields } from './settings-form';
+import { netWorkMinutes } from '../utils/schedule-engine';
 import { Break, BreakLogEntry, Settings } from '../state/types';
 import {
   timeStringToMinutes,
   minutesToTimestamp,
   minutesToTimeString,
+  formatDuration,
 } from '../utils/time-calculations';
 
 export interface DashboardData {
   breaks: Break[];
   settings: Settings;
+  workStart: string; // today's hours (may differ from the global settings)
+  workEnd: string;
+  isWorkday: boolean;
   log: Record<string, BreakLogEntry>;
 }
 
@@ -63,15 +68,19 @@ export class Dashboard {
       this.clock = new AnalogBreakClock(
         clockContainer,
         data.breaks,
-        data.settings.workingHoursStart,
-        data.settings.workingHoursEnd,
+        data.workStart,
+        data.workEnd,
         data.log
       );
     }
 
     const hours = this.container.querySelector('#working-hours');
     if (hours) {
-      hours.textContent = `${data.settings.workingHoursStart} – ${data.settings.workingHoursEnd}`;
+      hours.textContent = !data.isWorkday
+        ? 'Day off'
+        : `${data.workStart} – ${data.workEnd} · ${formatDuration(
+        netWorkMinutes(data.workStart, data.workEnd, data.breaks)
+      )} of work time`;
     }
 
     this.update();
@@ -127,6 +136,7 @@ export class Dashboard {
         </main>
 
         <footer class="app-footer">
+          <button class="footer-btn" data-action="open-schedule">Schedule</button>
           <button class="footer-btn" data-action="open-settings">Settings</button>
           <button class="footer-btn" data-action="open-help">Help</button>
         </footer>
@@ -182,7 +192,9 @@ export class Dashboard {
     } else if (breaks.length === 0) {
       titleText = 'Next Break';
       countdownText = '';
-      bodyHtml = '<p class="no-breaks">No breaks scheduled for today</p>';
+      bodyHtml = `<p class="no-breaks">${
+        this.data.isWorkday ? 'No breaks scheduled for today' : 'Today is not a workday'
+      }</p>`;
     } else {
       titleText = 'All Done';
       countdownText = '';

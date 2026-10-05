@@ -1,4 +1,5 @@
 import { Task } from '../state/types';
+import { formatTimeOfDay, getLocalDateKey, isValidTimeString, timeStringToMinutes } from '../utils/time-calculations';
 import { getTasks, saveTask, deleteTask, updateTask } from '../utils/storage';
 
 export class TaskManager {
@@ -40,6 +41,12 @@ export class TaskManager {
             <input type="number" id="task-duration" placeholder="Duration (min)" min="1" max="480">
           </div>
 
+          <div class="form-group task-time-field">
+            <label for="task-time">Start time (optional)</label>
+            <input type="time" id="task-time">
+            <p class="field-hint">Today at this time you'll get a reminder, and the task shows on the clock.</p>
+          </div>
+
           <div class="form-row">
             <button type="submit" class="btn btn-primary">Add Task</button>
             <button type="button" class="btn btn-secondary" id="cancel-task">Cancel</button>
@@ -66,8 +73,11 @@ export class TaskManager {
           .sort((a, b) => {
             // Open tasks first, then by priority (high > medium > low), then newest first
             const priorityOrder = { high: 0, medium: 1, low: 2 };
+            const timeOf = (t: Task) =>
+              t.scheduledTime ? timeStringToMinutes(t.scheduledTime) : Infinity;
             return (
               Number(a.completed) - Number(b.completed) ||
+              (timeOf(a) === timeOf(b) ? 0 : timeOf(a) < timeOf(b) ? -1 : 1) ||
               priorityOrder[a.priority] - priorityOrder[b.priority] ||
               b.createdAt - a.createdAt
             );
@@ -86,6 +96,11 @@ export class TaskManager {
     }[task.priority];
 
     const durationStr = task.duration ? `• ${task.duration}m` : '';
+    const timeStr = task.scheduledTime
+      ? `<span class="task-time">⏰ ${formatTimeOfDay(task.scheduledTime)}${
+          task.scheduledDate && task.scheduledDate !== getLocalDateKey() ? ` · ${task.scheduledDate}` : ''
+        }</span>`
+      : '';
 
     return `
       <li class="task-item ${task.completed ? 'completed' : ''}" data-task-id="${task.id}">
@@ -104,6 +119,7 @@ export class TaskManager {
             <span class="priority-badge" style="background-color: ${priorityColor}">
               ${task.priority}
             </span>
+            ${timeStr}
             ${durationStr}
           </div>
         </div>
@@ -169,8 +185,14 @@ export class TaskManager {
       .value as 'low' | 'medium' | 'high';
     const duration = parseInt((form.querySelector('#task-duration') as HTMLInputElement).value, 10);
 
+    const time = (form.querySelector('#task-time') as HTMLInputElement).value;
+
     if (!title) {
       alert('Please enter a task title');
+      return;
+    }
+    if (time && !isValidTimeString(time)) {
+      alert('Please enter a valid start time');
       return;
     }
 
@@ -181,6 +203,8 @@ export class TaskManager {
       priority,
       category: 'general',
       duration: duration || undefined,
+      scheduledTime: time || undefined,
+      scheduledDate: time ? getLocalDateKey() : undefined,
       completed: false,
       createdAt: Date.now(),
     };

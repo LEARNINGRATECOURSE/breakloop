@@ -57,6 +57,8 @@ export interface Task {
   category: string;
   duration?: number; // minutes
   dueDate?: string; // ISO format
+  scheduledDate?: string; // "YYYY-MM-DD" the task is planned for
+  scheduledTime?: string; // "HH:mm" start time on that day
   createdAt: number; // timestamp
 }
 
@@ -91,11 +93,23 @@ export interface BreakLogEntry {
   snoozedUntil?: number; // timestamp, when status is 'snoozed'
 }
 
+export type FocusModeId = 'pomodoro' | 'deep' | 'flow';
+
+export interface FocusLogEntry {
+  id: string;
+  date: string; // "YYYY-MM-DD" (local) the session started on
+  mode: FocusModeId;
+  startedAt: number; // timestamp
+  endedAt: number; // timestamp
+  completed: boolean; // false when stopped early
+}
+
 export interface AppState {
   settings: Settings;
   schedules: BreakSchedule[];
   tasks: Task[];
   todayBreaks: Break[];
   breakLog: Record<string, BreakLogEntry>; // keyed by breakId, today only
+  focusLog: FocusLogEntry[]; // today's focus sessions
   today: string; // "YYYY-MM-DD" (local)
 }

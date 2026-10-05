@@ -1189,8 +1189,9 @@ body.modal-open {
     grid-template-areas:
       'clock next'
       'clock actions'
+      'clock tasks'
       'clock list';
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto auto auto 1fr;
     column-gap: 3rem;
     row-gap: 1.5rem;
     align-items: start;
@@ -1590,4 +1591,116 @@ body.modal-open {
 
 .next-break-card .break-card-actions {
   justify-content: center;
+}
+
+/* Clock legend */
+.clock-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.clock-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.clock-legend i {
+  display: inline-block;
+  background-color: var(--accent);
+}
+
+.lg-break {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  opacity: 0.55;
+}
+
+.lg-focus {
+  width: 14px;
+  height: 5px;
+  border-radius: 2px;
+  opacity: 0.9;
+}
+
+.lg-task {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: none !important;
+  border: 1.5px solid var(--accent);
+}
+
+/* Tasks with a start time */
+.task-time-field {
+  margin: 0.25rem 0;
+}
+
+.task-time {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.tasks-today h3 {
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.tasks-today-items {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tasks-today-items li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tasks-today-items li.done {
+  opacity: 0.5;
+}
+
+.tasks-today-items li.done .task-name {
+  text-decoration: line-through;
+}
+
+.tasks-today-items .task-name {
+  flex: 1;
+}
+
+.tasks-today-items .task-dur {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+@media (min-width: 900px) {
+  .tasks-today {
+    grid-area: tasks;
+  }
+}
+
+/* Focus session vs breaks */
+.conflict-list {
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+  color: var(--text-primary);
+}
+
+.conflict-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }

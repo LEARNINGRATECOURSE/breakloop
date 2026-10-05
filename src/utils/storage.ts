@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import { BreakSchedule, Task, Settings, BreakLogEntry } from '../state/types';
+import { BreakSchedule, Task, Settings, BreakLogEntry, FocusLogEntry } from '../state/types';
 
 // Settings are stored as a single row with a fixed primary key
 const SETTINGS_KEY = 1;
@@ -10,6 +10,7 @@ export class BreakLoopDB extends Dexie {
   tasks!: Table<Task, string>;
   settings!: Table<SettingsRow, number>;
   breakLog!: Table<BreakLogEntry, string>;
+  focusLog!: Table<FocusLogEntry, string>;
 
   constructor() {
     super('BreakLoopDB');
@@ -20,6 +21,9 @@ export class BreakLoopDB extends Dexie {
     });
     this.version(2).stores({
       breakLog: 'id, date',
+    });
+    this.version(3).stores({
+      focusLog: 'id, date',
     });
   }
 }
@@ -120,9 +124,18 @@ export async function exportAllData() {
     schedules: await db.schedules.toArray(),
     tasks: await db.tasks.toArray(),
     breakLog: await db.breakLog.toArray(),
+    focusLog: await db.focusLog.toArray(),
   };
 }
 
 export async function resetAllData() {
-  await Promise.all([db.schedules.clear(), db.tasks.clear(), db.settings.clear(), db.breakLog.clear()]);
+  await Promise.all([db.schedules.clear(), db.tasks.clear(), db.settings.clear(), db.breakLog.clear(), db.focusLog.clear()]);
+}
+
+export async function getFocusLogForDate(date: string): Promise<FocusLogEntry[]> {
+  return db.focusLog.where('date').equals(date).toArray();
+}
+
+export async function saveFocusLogEntry(entry: FocusLogEntry) {
+  await db.focusLog.put(entry);
 }

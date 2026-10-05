@@ -8,6 +8,7 @@ import {
   formatTimeOfDay,
   formatHourLabel,
   getTimeFormat,
+  getMinutesSinceMidnight,
 } from '../utils/time-calculations';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -28,6 +29,23 @@ export interface ClockCenter {
   detail: string; // small line, e.g. "Break 1 · 10:40 AM · 5m"
 }
 
+/** A focus session to draw on the dial. `endedAt` is null while it is still running. */
+export interface ClockFocus {
+  startedAt: number;
+  endedAt: number | null;
+  completed: boolean;
+}
+
+/** A task planned for a time of day. */
+export interface ClockTask {
+  title: string;
+  time: string; // "HH:mm"
+  done: boolean;
+}
+
+const FOCUS_RADIUS = 125; // focus sessions sit just inside the breaks
+const TASK_RADIUS = 98; // task markers sit inside the hour numbers
+
 /** Everything is drawn in the accent colour so the clock follows the chosen theme. */
 const ACCENT = 'var(--accent)';
 
@@ -40,6 +58,8 @@ export class AnalogBreakClock {
   private startMinutes: number;
   private endMinutes: number;
   private center: ClockCenter | null = null;
+  private focus: ClockFocus[] = [];
+  private tasks: ClockTask[] = [];
 
   constructor(
     container: HTMLElement,
@@ -88,6 +108,8 @@ export class AnalogBreakClock {
     this.drawTrack();
     this.drawHourMarkers();
     this.breaks.forEach((b, i) => this.drawBreak(b, i));
+    this.drawFocusSessions();
+    this.drawTasks();
     this.drawTimeHand();
     this.drawCenter();
 
@@ -228,6 +250,78 @@ export class AnalogBreakClock {
     this.text(CX, CY + 4, c.headline, { size: c.headline.length > 12 ? 17 : 24, weight: 300, fill: 'var(--text-primary)', cls: 'clock-headline' });
     if (c.detail) {
       this.text(CX, CY + 30, c.detail, { size: 9.5, weight: 400, fill: 'var(--text-secondary)', cls: 'clock-detail' });
+    }
+  }
+
+  /** Focus sessions and scheduled tasks to mark on the dial. */
+  public setOverlays(focus: ClockFocus[], tasks: ClockTask[]) {
+    const changed = JSON.stringify([focus, tasks]) !== JSON.stringify([this.focus, this.tasks]);
+    this.focus = focus;
+    this.tasks = tasks;
+    if (changed) this.render();
+  }
+
+  /** Focus sessions: a solid arc just inside the breaks, with a check mark once finished. */
+  private drawFocusSessions() {
+    for (const f of this.focus) {
+      const end = f.endedAt ?? Date.now();
+      const from = Math.max(this.startMinutes, getMinutesSinceMidnight(new Date(f.startedAt)));
+      const to = Math.min(this.endMinutes - 0.001, getMinutesSinceMidnight(new Date(end)) + (end % 60000) / 60000);
+      if (!(to > from)) continue;
+
+      const running = f.endedAt === null;
+      const group = document.createElementNS(SVG_NS, 'g');
+      group.setAttribute('class', `focus-marker${running ? ' running' : ''}`);
+      const title = document.createElementNS(SVG_NS, 'title');
+      title.textContent = running
+        ? 'Focus session in progress'
+        : f.completed
+          ? `Focus session completed (${Math.round((end - f.startedAt) / 60000)} min)`
+          : `Focus session stopped early (${Math.round((end - f.startedAt) / 60000)} min)`;
+      group.appendChild(title);
+
+      this.arc(group, from, to, FOCUS_RADIUS, 5, ACCENT, running ? 0.45 : f.completed ? 0.9 : 0.4, 'focus-arc');
+
+      if (f.completed) {
+        // Check mark badge at the end of the arc
+        const p = this.polar(this.angle(to), FOCUS_RADIUS);
+        const badge = document.createElementNS(SVG_NS, 'circle');
+        badge.setAttribute('cx', String(p.x));
+        badge.setAttribute('cy', String(p.y));
+        badge.setAttribute('r', '6');
+        badge.setAttribute('fill', ACCENT);
+        group.appendChild(badge);
+        const tick = document.createElementNS(SVG_NS, 'path');
+        tick.setAttribute('d', `M ${p.x - 3} ${p.y} L ${p.x - 0.8} ${p.y + 2.4} L ${p.x + 3} ${p.y - 2.4}`);
+        tick.setAttribute('fill', 'none');
+        tick.setAttribute('stroke', '#fff');
+        tick.setAttribute('stroke-width', '1.6');
+        tick.setAttribute('stroke-linecap', 'round');
+        tick.setAttribute('stroke-linejoin', 'round');
+        group.appendChild(tick);
+      }
+      this.svg.appendChild(group);
+    }
+  }
+
+  /** Scheduled tasks: open rings (filled once done) at their start time. */
+  private drawTasks() {
+    for (const t of this.tasks) {
+      const m = timeStringToMinutes(t.time);
+      if (!(m >= this.startMinutes && m < this.endMinutes)) continue;
+      const p = this.polar(this.angle(m), TASK_RADIUS);
+      const dot = document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('cx', String(p.x));
+      dot.setAttribute('cy', String(p.y));
+      dot.setAttribute('r', '3.5');
+      dot.setAttribute('fill', t.done ? ACCENT : 'var(--bg-primary)');
+      dot.setAttribute('stroke', ACCENT);
+      dot.setAttribute('stroke-width', '1.2');
+      dot.setAttribute('class', 'task-marker');
+      const title = document.createElementNS(SVG_NS, 'title');
+      title.textContent = `${t.title} · ${formatTimeOfDay(t.time)}`;
+      dot.appendChild(title);
+      this.svg.appendChild(dot);
     }
   }
 

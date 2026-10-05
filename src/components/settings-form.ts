@@ -1,4 +1,5 @@
 import { AccentColor, Settings, ThemeMode } from '../state/types';
+import { SOUND_OPTIONS } from '../utils/service-worker';
 import {
   getDeviceTimeZone,
   isValidTimeString,
@@ -139,6 +140,30 @@ export function renderSettingsSections(settings: Settings): string {
         <label for="sound">Play a sound</label>
       </div>
       <div class="form-group">
+        <span class="field-label">Notification sound</span>
+        <div class="sound-list" role="radiogroup" aria-label="Notification sound">
+          ${SOUND_OPTIONS.map(
+            (o) => `
+            <div class="sound-option">
+              <label class="sound-choice">
+                <input type="radio" name="sound-type" value="${o.value}" ${o.value === settings.soundType ? 'checked' : ''}>
+                <span><strong>${o.label}</strong><small>${o.hint}</small></span>
+              </label>
+              <button type="button" class="btn btn-secondary btn-small" data-action="test-sound" data-sound="${o.value}"
+                aria-label="Play ${o.label} sound">▶ Test</button>
+            </div>`
+          ).join('')}
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="sound-volume">Volume</label>
+        <input type="range" id="sound-volume" min="0" max="100" step="5" value="${settings.soundVolume}" class="volume-slider">
+      </div>
+      <div class="form-group">
+        <button type="button" class="btn btn-secondary btn-small" data-action="test-popup">Show a test pop-up</button>
+        <p class="field-hint">Break reminders appear as a pop-up in the corner while BreakLoop is open, and as a system notification when it's in the background.</p>
+      </div>
+      <div class="form-group">
         <label for="lead-time">Remind me before a break</label>
         <select id="lead-time">
           ${LEAD_OPTIONS.map(
@@ -275,7 +300,8 @@ export function readSettingsFields(root: ParentNode): SettingsFormResult {
   // Fields below only exist in the full Settings panel, not in onboarding
   const radio = (name: string) =>
     root.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)?.value;
-  const select = (id: string) => root.querySelector<HTMLSelectElement>(`#${id}`)?.value;
+  const select = (id: string) =>
+    root.querySelector<HTMLSelectElement | HTMLInputElement>(`#${id}`)?.value;
 
   const theme = radio('theme');
   if (theme === 'system' || theme === 'light' || theme === 'dark') values.theme = theme;
@@ -290,6 +316,10 @@ export function readSettingsFields(root: ParentNode): SettingsFormResult {
     }
     values.timeZone = timeZone;
   }
+  const soundType = radio('sound-type');
+  if (soundType === 'chime' || soundType === 'beep' || soundType === 'marimba') values.soundType = soundType;
+  const volume = Number(select('sound-volume'));
+  if (select('sound-volume') !== undefined && volume >= 0 && volume <= 100) values.soundVolume = volume;
   const lead = Number(select('lead-time'));
   if (select('lead-time') !== undefined && Number.isFinite(lead)) values.reminderLeadMinutes = lead;
   const snooze = Number(select('snooze-time'));

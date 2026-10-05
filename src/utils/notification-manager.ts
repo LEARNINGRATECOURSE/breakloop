@@ -15,6 +15,7 @@ const GRACE_MS = 5 * 60 * 1000; // don't fire stale reminders (e.g. after the la
  */
 export class NotificationManager {
   private settings: Settings;
+  private onReminder: ((breakItem: Break, snoozed: boolean) => void) | null = null;
   // Keys of reminders already fired, e.g. "2026-10-05|break-10:50|0"
   private fired: Set<string> = new Set();
 
@@ -58,21 +59,28 @@ export class NotificationManager {
     }
   }
 
+  /** Called for each reminder so the app can show an in-page pop-up. */
+  public setOnReminder(callback: (breakItem: Break, snoozed: boolean) => void) {
+    this.onReminder = callback;
+  }
+
   public showBreakNotification(breakItem: Break, snoozed = false) {
     if (!this.settings.notificationsEnabled) {
       return;
     }
 
     if (this.settings.soundEnabled) {
-      playNotificationSound();
+      playNotificationSound(this.settings.soundType, this.settings.soundVolume);
     }
 
-    const body = snoozed
-      ? `Snooze is over — time for your ${breakItem.duration} minute break.`
-      : `${breakItem.duration} minute break at ${formatTimeOfDay(breakItem.startTime)}`;
+    // Visible page: in-app pop-up. Hidden page: system notification.
+    if (!document.hidden) {
+      this.onReminder?.(breakItem, snoozed);
+      return;
+    }
 
     void sendNotification(snoozed ? 'Break time!' : `Time for ${breakItem.name.toLowerCase()} soon!`, {
-      body,
+      body: describeReminder(breakItem, snoozed, this.settings.reminderLeadMinutes),
       icon: '/icon-192.png',
       badge: '/icon-192.png',
       tag: `break-${breakItem.id}`,
@@ -87,4 +95,14 @@ export class NotificationManager {
   public static requestPermission(): Promise<boolean> {
     return requestNotificationPermission();
   }
+}
+
+/** Body text shared by the pop-up and the system notification. */
+export function describeReminder(breakItem: Break, snoozed: boolean, leadMinutes: number): string {
+  if (snoozed) return `Snooze is over — time for your ${breakItem.duration} minute break.`;
+  const when =
+    leadMinutes > 0
+      ? `starts in ${leadMinutes} minute${leadMinutes === 1 ? '' : 's'}`
+      : `starts at ${formatTimeOfDay(breakItem.startTime)}`;
+  return `${breakItem.name} ${when} · ${breakItem.duration} min`;
 }

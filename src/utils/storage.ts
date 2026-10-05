@@ -34,6 +34,8 @@ export const DEFAULT_SETTINGS: Settings = {
   breakDurationMinutes: 5,
   notificationsEnabled: true,
   soundEnabled: true,
+  soundType: 'chime',
+  soundVolume: 70,
   theme: 'dark',
   accent: 'red',
   timeFormat: '24h',

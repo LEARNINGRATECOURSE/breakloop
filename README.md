@@ -151,3 +151,12 @@ MIT
 ---
 
 **BreakLoop** - Work smarter. Rest on time. Level up with your squad.
+
+## Background reminders (optional)
+
+Turn on **Settings → Notifications → Remind me even when the app is closed** to get break and task reminders when BreakLoop isn't open. This uses Web Push through the Netlify functions in `netlify/functions/`:
+
+- `push-sync` stores this device's push address and its next 7 days of reminder times/texts
+- `push-dispatch` runs every minute and sends the ones that are due
+
+Set these environment variables on the Netlify site: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (secret) and `VAPID_SUBJECT` (a URL or `mailto:`). Generate a pair with `npx web-push generate-vapid-keys`. On iPhone/iPad the app must first be added to the Home Screen (iOS 16.4+).

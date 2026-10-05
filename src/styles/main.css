@@ -1704,3 +1704,56 @@ body.modal-open {
   flex-direction: column;
   gap: 0.5rem;
 }
+
+/* Keep paired inputs (work start/end, break every/length) aligned on narrow phones */
+.form-group {
+  min-width: 0;
+}
+
+.form-group input[type="text"],
+.form-group input[type="time"],
+.form-group input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 3rem;
+}
+
+.form-group input[type="time"] {
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: left;
+}
+
+.form-group input[type="time"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+.ws-hours {
+  align-items: flex-start;
+}
+
+.ws-hours .form-group {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@media (max-width: 380px) {
+  .settings-section {
+    padding: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-group input[type="time"] {
+    padding-left: 0.6rem;
+    padding-right: 0.4rem;
+    font-size: 0.95rem;
+  }
+
+  /* The picker icon eats the space the time itself needs; tapping the field opens the picker anyway */
+  .form-group input[type="time"]::-webkit-calendar-picker-indicator {
+    display: none;
+  }
+}

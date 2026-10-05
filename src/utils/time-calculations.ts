@@ -155,6 +155,11 @@ export function getCurrentDayOfWeek(): number {
   return zonedParts(new Date()).weekday;
 }
 
+/** Day of week (0 = Sunday) of `date` in the active time zone. */
+export function getDayOfWeek(date: Date): number {
+  return zonedParts(date).weekday;
+}
+
 // Calendar date in the active time zone as "YYYY-MM-DD"
 export function getLocalDateKey(date: Date = new Date()): string {
   const p = zonedParts(date);

@@ -1,5 +1,6 @@
 import { AccentColor, Settings, ThemeMode } from '../state/types';
 import { SOUND_OPTIONS } from '../utils/service-worker';
+import { isPushSupported, needsHomeScreenInstall } from '../utils/push';
 import {
   getDeviceTimeZone,
   isValidTimeString,
@@ -140,7 +141,24 @@ export function renderSettingsSections(settings: Settings): string {
         <label for="sound">Play a sound</label>
       </div>
       <div class="form-group">
-        <span class="field-label">Notification sound</span>
+        <div class="form-group checkbox">
+          <input type="checkbox" id="background-reminders" ${settings.backgroundReminders ? 'checked' : ''}
+            ${isPushSupported() ? '' : 'disabled'}>
+          <label for="background-reminders">Remind me even when the app is closed</label>
+        </div>
+        <p class="field-hint">
+          ${
+            !isPushSupported()
+              ? "This browser doesn't support background notifications."
+              : needsHomeScreenInstall()
+                ? 'On iPhone/iPad, add BreakLoop to your Home Screen first (Share → Add to Home Screen), then turn this on from the installed app.'
+                : 'Uses a small reminder service that only stores your device\'s push address and the times and text of upcoming reminders. Nothing else leaves your device.'
+          }
+          The alert sound for these is your phone's own notification sound.
+        </p>
+      </div>
+      <div class="form-group">
+        <span class="field-label">Notification sound (while the app is open)</span>
         <div class="sound-list" role="radiogroup" aria-label="Notification sound">
           ${SOUND_OPTIONS.map(
             (o) => `
@@ -210,11 +228,11 @@ function renderWorkdayFields(settings: Settings): string {
     </div>
     <div class="form-row ws-hours">
       <div class="form-group">
-        <label for="break-frequency">Break every (min)</label>
+        <label for="break-frequency">Every (min)</label>
         <input type="number" id="break-frequency" value="${settings.breakFrequencyMinutes}" min="10" max="180" required>
       </div>
       <div class="form-group">
-        <label for="break-duration">Break length (min)</label>
+        <label for="break-duration">Length (min)</label>
         <input type="number" id="break-duration" value="${settings.breakDurationMinutes}" min="1" max="60" required>
       </div>
     </div>
@@ -316,6 +334,8 @@ export function readSettingsFields(root: ParentNode): SettingsFormResult {
     }
     values.timeZone = timeZone;
   }
+  const background = root.querySelector<HTMLInputElement>('#background-reminders');
+  if (background && !background.disabled) values.backgroundReminders = background.checked;
   const soundType = radio('sound-type');
   if (soundType === 'chime' || soundType === 'beep' || soundType === 'marimba') values.soundType = soundType;
   const volume = Number(select('sound-volume'));

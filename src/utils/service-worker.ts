@@ -50,7 +50,12 @@ export async function sendNotification(title: string, options?: NotificationOpti
   if ('serviceWorker' in navigator) {
     const registration = await navigator.serviceWorker.getRegistration();
     if (registration) {
-      await registration.showNotification(title, options);
+      await registration.showNotification(title, {
+        vibrate: [200, 100, 200],
+        renotify: true,
+        silent: false,
+        ...options,
+      } as NotificationOptions);
       return;
     }
   }
@@ -75,6 +80,48 @@ export const SOUND_OPTIONS: { value: SoundType; label: string; hint: string }[] 
 ];
 
 let audioContext: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return null;
+  audioContext ??= new AudioCtx();
+  return audioContext;
+}
+
+/**
+ * Mobile browsers keep audio muted until the user has touched the page. Call
+ * this on the first tap so later reminders (fired from a timer) can make sound.
+ */
+export function enableAudioOnFirstTouch() {
+  const events = ['pointerdown', 'touchend', 'click', 'keydown'] as const;
+  const unlock = () => {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      void ctx.resume();
+      // A silent blip fully unlocks iOS Safari
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      if (ctx.state === 'running') {
+        events.forEach((e) => window.removeEventListener(e, unlock));
+      }
+    } catch (error) {
+      console.error('Failed to unlock audio:', error);
+    }
+  };
+  events.forEach((e) => window.addEventListener(e, unlock, { passive: true }));
+  // Browsers may suspend audio again when the app is backgrounded
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && audioContext?.state === 'suspended') {
+      void audioContext.resume();
+    }
+  });
+}
 
 interface Note {
   freq: number;
@@ -102,18 +149,14 @@ const SOUNDS: Record<SoundType, Note[]> = {
 /** Play one of the built-in notification sounds. `volume` is 0-100. */
 export function playNotificationSound(type: SoundType = 'chime', volume = 70) {
   // Reuse one AudioContext: browsers cap how many can be open at once.
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioCtx) return;
-
   try {
-    audioContext ??= new AudioCtx();
-    const ctx = audioContext;
+    const ctx = getAudioContext();
+    if (!ctx) return;
     if (ctx.state === 'suspended') {
       void ctx.resume();
     }
 
+    navigator.vibrate?.([200, 100, 200]);
     const master = Math.max(0, Math.min(100, volume)) / 100;
     for (const note of SOUNDS[type] ?? SOUNDS.chime) {
       const osc = ctx.createOscillator();

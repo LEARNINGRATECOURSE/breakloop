@@ -88,19 +88,29 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(request.mode === 'navigate' ? networkFirst(request) : cacheFirst(request));
 });
 
-// Handle push notifications
+// Push: reminders sent by the server while the app is closed or in the background
 self.addEventListener('push', (event) => {
   const data = event.data?.json() ?? {};
   const title = data.title || 'BreakLoop';
-  const options: NotificationOptions = {
+  const options: NotificationOptions & { vibrate?: number[]; renotify?: boolean } = {
     body: data.body || 'Time for a break!',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
-    tag: 'breakloop-notification',
-    requireInteraction: false,
+    // Same tag as the in-page notification, so one reminder never shows twice
+    tag: data.tag || 'breakloop-notification',
+    renotify: true,
+    requireInteraction: true,
+    vibrate: [200, 100, 200],
+    silent: false,
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // An open, visible app already shows its own pop-up and plays its sound
+      if (clients.some((c) => c.visibilityState === 'visible')) return;
+      return self.registration.showNotification(title, options);
+    })
+  );
 });
 
 // Handle notification clicks: focus an open BreakLoop window or open one

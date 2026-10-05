@@ -72,6 +72,7 @@ export interface Settings {
   breakDurationMinutes: number;
   notificationsEnabled: boolean;
   soundEnabled: boolean;
+  backgroundReminders: boolean; // push reminders while the app is closed
   soundType: 'chime' | 'beep' | 'marimba';
   soundVolume: number; // 0-100
   theme: ThemeMode;

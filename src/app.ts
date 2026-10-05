@@ -24,6 +24,7 @@ import {
   getTasks,
   updateTask,
   getFocusLogForDate,
+  getSchedules,
   saveFocusLogEntry,
   resetAllData,
 } from './utils/storage';
@@ -31,6 +32,7 @@ import { generateBreaksForDay, legacyRules } from './utils/schedule-engine';
 import {
   formatTimeOfDay,
   getCurrentDayOfWeek,
+  getDayOfWeek,
   getLocalDateKey,
   getSecondsSinceMidnight,
   minutesToTimeString,
@@ -39,7 +41,13 @@ import {
   timeStringToMinutes,
 } from './utils/time-calculations';
 import { NotificationManager, describeReminder } from './utils/notification-manager';
-import { playNotificationSound, sendNotification, SoundType } from './utils/service-worker';
+import {
+  enableAudioOnFirstTouch,
+  playNotificationSound,
+  sendNotification,
+  SoundType,
+} from './utils/service-worker';
+import { disablePush, enablePush, PushReminder, syncReminders } from './utils/push';
 import { AppState, Break, BreakLogEntry, FocusModeId, BreakSchedule, BreakStatus, Settings } from './state/types';
 
 type ModalView = 'tasks' | 'focus' | 'schedule' | 'settings' | 'help';
@@ -85,6 +93,7 @@ export class App {
 
     this.applyTheme();
     this.applyTimeConfig();
+    enableAudioOnFirstTouch();
 
     this.notifications = new NotificationManager(this.state.settings);
     this.notifications.setOnReminder((b, snoozed) => this.showBreakToast(b, snoozed));
@@ -104,6 +113,7 @@ export class App {
 
     await this.loadToday();
     this.render();
+    this.schedulePushSync();
 
     this.startUpdateLoop();
   }
@@ -218,6 +228,7 @@ export class App {
 
     await this.loadToday();
     this.render();
+    this.schedulePushSync();
 
     const movedId = conflicts[0].b.id;
     const moved = this.state.todayBreaks.find((b) => b.id === movedId);
@@ -291,6 +302,78 @@ export class App {
         });
       }
     }
+  }
+
+  // ---- Background reminders (Web Push) ----
+
+  private pushSyncTimer: number | null = null;
+
+  /** Re-send the upcoming reminders to the push service shortly after anything changes. */
+  private schedulePushSync() {
+    if (!this.state.settings.backgroundReminders) return;
+    if (this.pushSyncTimer !== null) clearTimeout(this.pushSyncTimer);
+    this.pushSyncTimer = window.setTimeout(() => {
+      this.pushSyncTimer = null;
+      void this.syncPush();
+    }, 2000);
+  }
+
+  private async syncPush() {
+    try {
+      await syncReminders(await this.buildReminders());
+    } catch (error) {
+      console.error('Failed to sync reminders:', error);
+    }
+  }
+
+  /** Break and task reminders for the next 7 days. */
+  private async buildReminders(): Promise<PushReminder[]> {
+    const { settings } = this.state;
+    const schedules = await getSchedules();
+    const tasks = (await getTasks()).filter((t) => !t.completed && t.scheduledDate && t.scheduledTime);
+    const now = Date.now();
+    const reminders: PushReminder[] = [];
+
+    for (let offset = 0; offset < 7; offset++) {
+      const date = new Date(now + offset * 86400000);
+      const dateKey = getLocalDateKey(date);
+      const dow = getDayOfWeek(date);
+
+      let breaks: Break[];
+      if (offset === 0) {
+        // Today already has focus-session adjustments and done/skipped breaks applied
+        breaks = this.state.todayBreaks.filter((b) => {
+          const status = this.state.breakLog[b.id]?.status;
+          return status !== 'completed' && status !== 'skipped';
+        });
+      } else {
+        const schedule = schedules.find((s) => s.dayOfWeek === dow) ?? this.defaultSchedule(dow);
+        breaks = generateBreaksForDay(schedule, settings);
+      }
+
+      for (const b of breaks) {
+        const at = minutesToTimestamp(timeStringToMinutes(b.startTime), date) - settings.reminderLeadMinutes * 60000;
+        if (at < now - 60000) continue;
+        reminders.push({
+          at,
+          title: 'Time for a break',
+          body: describeReminder(b, false, settings.reminderLeadMinutes),
+          tag: `break-${b.id}`,
+        });
+      }
+
+      for (const t of tasks.filter((x) => x.scheduledDate === dateKey)) {
+        const at = minutesToTimestamp(timeStringToMinutes(t.scheduledTime!), date);
+        if (at < now - 60000) continue;
+        reminders.push({
+          at,
+          title: t.title,
+          body: `Time to start · ${formatTimeOfDay(t.scheduledTime!)}${t.duration ? ` · ${t.duration} min` : ''}`,
+          tag: `task-${t.id}`,
+        });
+      }
+    }
+    return reminders.sort((a, b) => a.at - b.at);
   }
 
   private isWorkingToday(): boolean {
@@ -467,6 +550,7 @@ export class App {
     }
 
     const zoneChanged = previousZone !== this.state.settings.timeZone;
+    this.schedulePushSync();
     this.notifications?.updateSettings(this.state.settings);
     if (zoneChanged) this.notifications?.reset();
     this.applyTheme();
@@ -491,6 +575,7 @@ export class App {
 
     this.state.breakLog = log;
     this.render();
+    this.schedulePushSync();
 
     try {
       if (status === null) {
@@ -594,7 +679,12 @@ export class App {
       case 'tasks': {
         title.textContent = 'Tasks';
         const taskManager = new TaskManager(body);
-        taskManager.setOnTasksChanged(() => void this.loadToday().then(() => this.render()));
+        taskManager.setOnTasksChanged(
+          () => void this.loadToday().then(() => {
+            this.render();
+            this.schedulePushSync();
+          })
+        );
         taskManager
           .load()
           .then(() => {
@@ -676,6 +766,7 @@ export class App {
         }
         await this.loadToday();
         this.render();
+        this.schedulePushSync();
         this.closeModal();
       },
     });
@@ -706,9 +797,28 @@ export class App {
     }
 
     // Ask before any other await so it still counts as part of the user gesture
-    const permission = result.values.notificationsEnabled
-      ? NotificationManager.requestPermission()
-      : Promise.resolve(false);
+    const wantsBackground = result.values.backgroundReminders === true;
+    const background =
+      result.values.backgroundReminders === undefined
+        ? null
+        : wantsBackground
+          ? enablePush()
+          : disablePush().then(() => ({ ok: true as const }));
+    const permission =
+      result.values.notificationsEnabled && !wantsBackground
+        ? NotificationManager.requestPermission()
+        : Promise.resolve(false);
+
+    const pushResult = await background;
+    if (pushResult && !pushResult.ok) {
+      // Keep the panel open so the reason is visible, and save everything else
+      result.values.backgroundReminders = false;
+      await this.saveSettings(result.values);
+      showFormError(form, `Saved, but background reminders are off: ${pushResult.reason}`);
+      const box = form.querySelector<HTMLInputElement>('#background-reminders');
+      if (box) box.checked = false;
+      return;
+    }
 
     await this.saveSettings(result.values);
     this.closeModal();

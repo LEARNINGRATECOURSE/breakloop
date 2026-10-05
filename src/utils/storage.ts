@@ -34,7 +34,12 @@ export const DEFAULT_SETTINGS: Settings = {
   breakDurationMinutes: 5,
   notificationsEnabled: true,
   soundEnabled: true,
-  darkMode: true,
+  theme: 'dark',
+  accent: 'red',
+  timeFormat: '24h',
+  timeZone: 'auto',
+  reminderLeadMinutes: 1,
+  snoozeMinutes: 5,
   onboarded: false,
 };
 
@@ -50,7 +55,12 @@ export async function getSettings(): Promise<Settings> {
   if (!row) {
     return { ...DEFAULT_SETTINGS };
   }
-  const { id: _id, ...settings } = row;
+  const { id: _id, ...stored } = row;
+  const { darkMode, ...settings } = stored as Partial<Settings> & { darkMode?: boolean };
+  // Older versions only had a dark mode switch
+  if (settings.theme === undefined && darkMode !== undefined) {
+    settings.theme = darkMode ? 'dark' : 'light';
+  }
   return { ...DEFAULT_SETTINGS, ...settings };
 }
 
@@ -97,4 +107,20 @@ export async function saveBreakLogEntry(entry: BreakLogEntry) {
 
 export async function deleteBreakLogEntry(id: string) {
   await db.breakLog.delete(id);
+}
+
+/** Everything BreakLoop stores, as a plain object (for the "Export my data" button). */
+export async function exportAllData() {
+  return {
+    app: 'BreakLoop',
+    exportedAt: new Date().toISOString(),
+    settings: await getSettings(),
+    schedules: await db.schedules.toArray(),
+    tasks: await db.tasks.toArray(),
+    breakLog: await db.breakLog.toArray(),
+  };
+}
+
+export async function resetAllData() {
+  await Promise.all([db.schedules.clear(), db.tasks.clear(), db.settings.clear(), db.breakLog.clear()]);
 }

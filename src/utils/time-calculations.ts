@@ -1,3 +1,103 @@
+export type TimeFormat = '12h' | '24h';
+
+interface TimeConfig {
+  timeZone: string | undefined; // IANA name; undefined = device time zone
+  format: TimeFormat;
+}
+
+const config: TimeConfig = { timeZone: undefined, format: '24h' };
+
+export function isValidTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getDeviceTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+/** Apply the user's time zone ('auto' = device) and 12/24 hour preference. */
+export function setTimeConfig(timeZone: string, format: TimeFormat) {
+  config.timeZone = timeZone !== 'auto' && isValidTimeZone(timeZone) ? timeZone : undefined;
+  config.format = format;
+}
+
+export function getTimeFormat(): TimeFormat {
+  return config.format;
+}
+
+interface ZonedParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  weekday: number; // 0 = Sunday
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+/** Wall-clock parts of `date` in the active time zone. */
+function zonedParts(date: Date): ZonedParts {
+  const key = config.timeZone ?? '';
+  let fmt = formatterCache.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: config.timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      weekday: 'short',
+    });
+    formatterCache.set(key, fmt);
+  }
+  const p: Record<string, string> = {};
+  for (const part of fmt.formatToParts(date)) p[part.type] = part.value;
+  return {
+    year: Number(p.year),
+    month: Number(p.month),
+    day: Number(p.day),
+    hour: Number(p.hour) % 24,
+    minute: Number(p.minute),
+    second: Number(p.second),
+    weekday: WEEKDAYS.indexOf(p.weekday),
+  };
+}
+
+/** "HH:mm" (24h storage format) -> "10:00" or "10:00 AM" per the user's preference. */
+export function formatTimeOfDay(time: string): string {
+  const total = timeStringToMinutes(time);
+  if (!Number.isFinite(total)) return time;
+  const h = Math.floor(total / 60) % 24;
+  const m = total % 60;
+  if (config.format === '24h') {
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** Hour number for clock-face labels: 0-23, or 1-12 in 12 hour mode. */
+export function formatHourLabel(hour: number): string {
+  const h = ((hour % 24) + 24) % 24;
+  return config.format === '24h' ? String(h) : String(h % 12 === 0 ? 12 : h % 12);
+}
+
+/** Current time in the active zone, formatted for display, e.g. "3:42 PM". */
+export function formatNow(date: Date = new Date()): string {
+  const p = zonedParts(date);
+  return formatTimeOfDay(`${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`);
+}
+
 export function timeStringToMinutes(timeStr: string): number {
   const [hours, minutes] = timeStr.split(':').map(Number);
   return hours * 60 + minutes;
@@ -11,8 +111,8 @@ export function minutesToTimeString(minutes: number): string {
 }
 
 export function getCurrentTimeInMinutes(): number {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+  const p = zonedParts(new Date());
+  return p.hour * 60 + p.minute;
 }
 
 export function isWithinWorkingHours(
@@ -24,15 +124,13 @@ export function isWithinWorkingHours(
 }
 
 export function getMinutesSinceMidnight(date: Date = new Date()): number {
-  return date.getHours() * 60 + date.getMinutes();
+  const p = zonedParts(date);
+  return p.hour * 60 + p.minute;
 }
 
 export function getSecondsSinceMidnight(date: Date = new Date()): number {
-  return (
-    date.getHours() * 3600 +
-    date.getMinutes() * 60 +
-    date.getSeconds()
-  );
+  const p = zonedParts(date);
+  return p.hour * 3600 + p.minute * 60 + p.second;
 }
 
 export function getMinutesUntil(targetMinutes: number): number {
@@ -54,22 +152,20 @@ export function getSecondsSinceStart(startMinutes: number): number {
 }
 
 export function getCurrentDayOfWeek(): number {
-  return new Date().getDay();
+  return zonedParts(new Date()).weekday;
 }
 
-// Local calendar date as "YYYY-MM-DD" (not UTC, unlike toISOString)
+// Calendar date in the active time zone as "YYYY-MM-DD"
 export function getLocalDateKey(date: Date = new Date()): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  const p = zonedParts(date);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
 }
 
-// Timestamp for a "minutes since midnight" value on the same local day as `date`
+// Timestamp for a "minutes since midnight" value on the same day (in the active zone) as `date`
 export function minutesToTimestamp(minutes: number, date: Date = new Date()): number {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime() + minutes * 60 * 1000;
+  const p = zonedParts(date);
+  const midnight = date.getTime() - (p.hour * 3600 + p.minute * 60 + p.second) * 1000 - date.getMilliseconds();
+  return midnight + minutes * 60 * 1000;
 }
 
 export function isValidTimeString(timeStr: string | undefined | null): timeStr is string {

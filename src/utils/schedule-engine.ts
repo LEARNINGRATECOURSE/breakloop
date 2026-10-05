@@ -4,6 +4,7 @@ import {
   minutesToTimeString,
   getSecondsSinceMidnight,
   formatDuration,
+  formatTimeOfDay,
 } from './time-calculations';
 
 const BREAK_COLORS: Record<Break['type'], string> = {
@@ -123,7 +124,7 @@ export function describeRule(rule: BreakRule): string {
   const dur = formatDuration(rule.duration);
   switch (rule.kind) {
     case 'exact':
-      return `At ${rule.time ?? '--:--'} · ${dur}`;
+      return `At ${rule.time ? formatTimeOfDay(rule.time) : '--:--'} · ${dur}`;
     case 'count':
       return `${rule.count ?? 0} per day · ${dur} each`;
     case 'repeated':

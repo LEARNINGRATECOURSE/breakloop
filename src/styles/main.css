@@ -198,7 +198,7 @@ a:hover {
 
 .analog-clock {
   width: 100%;
-  max-width: 320px;
+  max-width: 440px;
   height: auto;
   aspect-ratio: 1;
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
@@ -634,7 +634,7 @@ body.modal-open {
   }
 
   .analog-clock {
-    max-width: 250px;
+    max-width: 360px;
   }
 
   .onboarding {
@@ -1018,8 +1018,8 @@ body.modal-open {
 
 .day-tab {
   flex: 1;
-  min-width: 3rem;
-  padding: 0.5rem 0.25rem;
+  min-width: 0;
+  padding: 0.5rem 0;
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
@@ -1178,4 +1178,48 @@ body.modal-open {
 
 .day-picker .form-group.checkbox {
   padding: 0.25rem 0;
+}
+
+/* Desktop: clock on the left, break details side by side on the right */
+@media (min-width: 900px) {
+  .dashboard-main {
+    max-width: 1200px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas:
+      'clock next'
+      'clock actions'
+      'clock list';
+    grid-template-rows: auto auto 1fr;
+    column-gap: 3rem;
+    row-gap: 1.5rem;
+    align-items: start;
+  }
+
+  .clock-section {
+    grid-area: clock;
+    position: sticky;
+    top: 1.5rem;
+  }
+
+  .analog-clock {
+    max-width: 600px;
+  }
+
+  .next-break-section {
+    grid-area: next;
+  }
+
+  .next-break-card {
+    max-width: none;
+  }
+
+  .quick-actions {
+    grid-area: actions;
+  }
+
+  .breaks-list {
+    grid-area: list;
+    margin-top: 0;
+  }
 }

@@ -9,7 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@netlify/blobs": "8.2.0",
+    "@netlify/blobs": "11.1.2",
     "dexie": "^4.0.4",
     "web-push": "^3.6.7"
   },

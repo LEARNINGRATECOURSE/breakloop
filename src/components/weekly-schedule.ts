@@ -44,13 +44,13 @@ function newForm(): BreakForm {
     kind: 'repeated',
     name: '',
     countAsWork: true,
-    hour: 12,
+    hour: 0,
     minute: 0,
     everyHours: 0,
-    everyMinutes: 25,
-    count: 8,
+    everyMinutes: 0,
+    count: 0,
     durHours: 0,
-    durMinutes: 5,
+    durMinutes: 0,
   };
 }
 

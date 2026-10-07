@@ -47,7 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   timeZone: 'auto',
   reminderLeadMinutes: 1,
   snoozeMinutes: 5,
-  onboarded: false,
+  onboarded: true,
 };
 
 export async function initializeStorage() {

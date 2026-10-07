@@ -37,7 +37,6 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
 }
 
 async function getRegistration(): Promise<ServiceWorkerRegistration | null> {
-  if (!import.meta.env.PROD) return null; // the service worker only exists in production builds
   return Promise.race([
     navigator.serviceWorker.ready,
     new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),

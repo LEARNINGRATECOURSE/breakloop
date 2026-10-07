@@ -73,12 +73,7 @@ export class NotificationManager {
       playNotificationSound(this.settings.soundType, this.settings.soundVolume);
     }
 
-    // Visible page: in-app pop-up. Hidden page: system notification.
-    if (!document.hidden) {
-      this.onReminder?.(breakItem, snoozed);
-      return;
-    }
-
+    // Always send system notification (works when app is closed/minimized)
     void sendNotification(snoozed ? 'Break time!' : `Time for ${breakItem.name.toLowerCase()} soon!`, {
       body: describeReminder(breakItem, snoozed, this.settings.reminderLeadMinutes),
       icon: '/icon-192.png',
@@ -86,6 +81,11 @@ export class NotificationManager {
       tag: `break-${breakItem.id}`,
       requireInteraction: true,
     });
+
+    // Also show in-app pop-up if page is visible
+    if (!document.hidden) {
+      this.onReminder?.(breakItem, snoozed);
+    }
   }
 
   public reset() {
